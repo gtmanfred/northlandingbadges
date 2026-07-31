@@ -1,0 +1,79 @@
+name: ci
+
+# Required status check for merge. Runs with no secrets available: every test
+# either uses a fake or is skipped with an explicit log line (spec §6).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: unit and integration tests
+        run: go test -race -shuffle=on -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: artifact validation
+        # Re-run the wallet and email artifact checks verbosely so a failure names
+        # the exact structural assertion that broke (.pkpass zip/manifest/signature,
+        # Google Wallet JWT claims, golden HTML email).
+        run: |
+          go test -v -run 'Manifest|Signature|PassJSON|Zip|JWT|SaveLink|Golden|MIME' \
+            ./internal/wallet/... ./internal/email/...
+
+      - name: coverage report
+        run: |
+          go tool cover -func=coverage.out | tee coverage.txt
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # Expiration logic, the delivery guard and dedupe must not regress.
+          grep -E 'internal/(expiry|mailer|store)/' coverage.txt >> "$GITHUB_STEP_SUMMARY" || true
+          grep '^total:' coverage.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.txt
+
+      - name: docker build
+        # Proves the deployable image still builds; nothing is pushed here.
+        run: docker build --build-arg VERSION=ci-${{ github.sha }} -t north-landing-badges:ci .

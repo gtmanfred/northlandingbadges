@@ -1,0 +1,99 @@
+name: contract-check
+
+# Early-warning system for the scraping fallback (spec §6, contract drift).
+#
+# DiscGolfScene publishes no API contract, so this fetches the live page with test
+# credentials and asserts the parser still extracts what it needs. A failure means
+# upstream markup changed, not that a PR regressed — so it opens an issue rather
+# than blocking merges. It is deliberately NOT a required check.
+on:
+  schedule:
+    - cron: "20 6 * * *" # daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: contract-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: check parser against live DiscGolfScene page
+        id: check
+        env:
+          DGS_ROSTER_URL: ${{ secrets.DGS_ROSTER_URL }}
+          DGS_LOGIN_URL: ${{ secrets.DGS_LOGIN_URL }}
+          DGS_USERNAME: ${{ secrets.DGS_USERNAME }}
+          DGS_PASSWORD: ${{ secrets.DGS_PASSWORD }}
+          CLUB_TIMEZONE: America/New_York
+        run: |
+          set -o pipefail
+          if [ -z "${DGS_ROSTER_URL}" ]; then
+            echo "DGS_ROSTER_URL is not configured; cannot check the live contract." | tee output.txt
+            exit 1
+          fi
+          go run ./cmd/contract-check 2>&1 | tee output.txt
+
+      - name: open an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let output = '(no output captured)';
+            try { output = fs.readFileSync('output.txt', 'utf8'); } catch (e) {}
+
+            const title = 'DiscGolfScene parser contract check failed';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              'The daily contract check could not extract the expected fields from the live',
+              'DiscGolfScene page. This usually means upstream markup or item labels changed,',
+              'so the polling fallback (Option B) is broken or about to be.',
+              '',
+              `Run: ${runUrl}`,
+              '',
+              '```',
+              output.trim().slice(0, 60000),
+              '```',
+            ].join('\n');
+
+            // Reuse an open issue instead of filing one per day.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'contract-drift',
+            });
+            const match = existing.data.find(i => i.title === title);
+
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body,
+              });
+              core.notice(`Commented on existing issue #${match.number}`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['contract-drift'],
+            });
+            core.notice(`Opened issue #${created.data.number}`);

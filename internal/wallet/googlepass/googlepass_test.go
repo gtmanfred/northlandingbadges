@@ -1,0 +1,234 @@
+package googlepass_test
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/northlanding/badges/internal/config"
+	"github.com/northlanding/badges/internal/domain"
+	"github.com/northlanding/badges/internal/testkeys"
+	"github.com/northlanding/badges/internal/wallet/googlepass"
+)
+
+func testConfig() config.GoogleConfig {
+	return config.GoogleConfig{
+		IssuerID:            "3388000000012345678",
+		ClassID:             "3388000000012345678.north-landing-badge",
+		ServiceAccountEmail: "wallet@north-landing.iam.gserviceaccount.com",
+		KeyPEM:              testkeys.GoogleServiceAccountKeyPEM(),
+	}
+}
+
+func testBadge() domain.Badge {
+	ny, _ := time.LoadLocation("America/New_York")
+	return domain.Badge{
+		Registration: domain.Registration{
+			ID:          "DGS/88231",
+			Name:        "Casey Chains",
+			Email:       "casey@example.com",
+			RawPassType: "Day Pass",
+			PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, ny),
+		},
+		PassType:  domain.PassTypeDay,
+		ExpiresAt: time.Date(2026, 7, 5, 23, 59, 59, 0, ny),
+	}
+}
+
+type parsedClaims struct {
+	Issuer   string `json:"iss"`
+	Audience string `json:"aud"`
+	Type     string `json:"typ"`
+	IssuedAt int64  `json:"iat"`
+	Payload  struct {
+		GenericObjects []struct {
+			ID          string `json:"id"`
+			ClassID     string `json:"classId"`
+			State       string `json:"state"`
+			GenericType string `json:"genericType"`
+			Header      struct {
+				DefaultValue struct{ Value string } `json:"defaultValue"`
+			} `json:"header"`
+			Subheader struct {
+				DefaultValue struct{ Value string } `json:"defaultValue"`
+			} `json:"subheader"`
+			TextModulesData []struct {
+				ID, Header, Body string
+			} `json:"textModulesData"`
+			Barcode struct {
+				Type  string `json:"type"`
+				Value string `json:"value"`
+			} `json:"barcode"`
+			ValidTimeInterval struct {
+				End struct {
+					Date string `json:"date"`
+				} `json:"end"`
+			} `json:"validTimeInterval"`
+		} `json:"genericObjects"`
+	} `json:"payload"`
+}
+
+func TestSaveJWTVerifiesAndCarriesExpiration(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	b := testBadge()
+
+	jwt, err := issuer.SaveJWT(b, ny)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	if got := len(strings.Split(jwt, ".")); got != 3 {
+		t.Fatalf("jwt has %d segments, want 3", got)
+	}
+
+	raw, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var c parsedClaims
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("claims are not JSON: %v", err)
+	}
+
+	if c.Issuer != testConfig().ServiceAccountEmail {
+		t.Errorf("iss = %q", c.Issuer)
+	}
+	if c.Audience != "google" {
+		t.Errorf("aud = %q, want google", c.Audience)
+	}
+	if c.Type != "savetowallet" {
+		t.Errorf("typ = %q, want savetowallet", c.Type)
+	}
+	if c.IssuedAt == 0 {
+		t.Error("iat is unset")
+	}
+	if len(c.Payload.GenericObjects) != 1 {
+		t.Fatalf("genericObjects = %d, want 1", len(c.Payload.GenericObjects))
+	}
+
+	obj := c.Payload.GenericObjects[0]
+	wantExpiry := b.ExpiresAt.In(ny).Format(time.RFC3339)
+	if obj.ValidTimeInterval.End.Date != wantExpiry {
+		t.Errorf("validTimeInterval.end = %q, want %q", obj.ValidTimeInterval.End.Date, wantExpiry)
+	}
+	var expiresModule string
+	for _, m := range obj.TextModulesData {
+		if m.ID == "expires" {
+			expiresModule = m.Body
+		}
+	}
+	if expiresModule != wantExpiry {
+		t.Errorf("expires module = %q, want %q", expiresModule, wantExpiry)
+	}
+	if obj.ClassID != testConfig().ClassID {
+		t.Errorf("classId = %q", obj.ClassID)
+	}
+	if obj.Header.DefaultValue.Value != b.Registration.Name {
+		t.Errorf("header = %q, want guest name", obj.Header.DefaultValue.Value)
+	}
+	if obj.Subheader.DefaultValue.Value != "Day Pass" {
+		t.Errorf("subheader = %q, want pass type", obj.Subheader.DefaultValue.Value)
+	}
+	if obj.Barcode.Value != b.Registration.ID {
+		t.Errorf("barcode value = %q, want registration id", obj.Barcode.Value)
+	}
+}
+
+func TestObjectIDIsSanitizedAndIssuerPrefixed(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	raw, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var c parsedClaims
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := "3388000000012345678.DGS-88231" // slash replaced
+	if got := c.Payload.GenericObjects[0].ID; got != want {
+		t.Errorf("object id = %q, want %q", got, want)
+	}
+}
+
+func TestSaveLinkUsesGooglePayPrefix(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	link, err := issuer.SaveLink(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveLink: %v", err)
+	}
+	if !strings.HasPrefix(link, googlepass.SaveURLPrefix) {
+		t.Errorf("link = %q, want %s prefix", link, googlepass.SaveURLPrefix)
+	}
+	if _, err := googlepass.Verify(strings.TrimPrefix(link, googlepass.SaveURLPrefix), issuer.PublicKey()); err != nil {
+		t.Errorf("link JWT does not verify: %v", err)
+	}
+}
+
+func TestVerifyRejectsTamperedJWT(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	parts := strings.Split(jwt, ".")
+
+	tampered := parts[0] + "." + parts[1] + "x." + parts[2]
+	if _, err := googlepass.Verify(tampered, issuer.PublicKey()); err == nil {
+		t.Error("tampered claims verified")
+	}
+	if _, err := googlepass.Verify("only.two", issuer.PublicKey()); err == nil {
+		t.Error("malformed jwt verified")
+	}
+	if _, err := googlepass.Verify(parts[0]+"."+parts[1]+".!!!", issuer.PublicKey()); err == nil {
+		t.Error("undecodable signature verified")
+	}
+}
+
+func TestNewIssuerRejectsBadConfig(t *testing.T) {
+	t.Parallel()
+	if _, err := googlepass.NewIssuer(config.GoogleConfig{}); err == nil {
+		t.Error("expected error for unconfigured issuer")
+	}
+	bad := testConfig()
+	bad.KeyPEM = "not a key"
+	if _, err := googlepass.NewIssuer(bad); err == nil {
+		t.Error("expected error for malformed key")
+	}
+}
+
+func TestSaveJWTRejectsIncompleteBadge(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	if _, err := issuer.SaveJWT(domain.Badge{}, time.UTC); err == nil {
+		t.Error("expected error for empty badge")
+	}
+	noExpiry := testBadge()
+	noExpiry.ExpiresAt = time.Time{}
+	if _, err := issuer.SaveJWT(noExpiry, time.UTC); err == nil {
+		t.Error("expected error for badge without expiration")
+	}
+}

@@ -1,0 +1,15 @@
+bin/
+coverage.out
+coverage.txt
+*.db
+*.db-wal
+*.db-shm
+
+# Never commit real signing material. The only certificates in this repo are the
+# throwaway test keys in internal/testkeys/.
+apple-pass-cert.pem
+apple-pass-key.pem
+wwdr.pem
+google-service-account*.json
+.env
+.env.*

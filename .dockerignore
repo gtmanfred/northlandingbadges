@@ -1,0 +1,13 @@
+.git
+.github
+bin
+coverage.out
+coverage.txt
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+README.md
+SPEC.md
+Makefile

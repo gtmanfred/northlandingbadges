@@ -1,0 +1,76 @@
+name: poll
+
+# Production poll trigger (spec §4). This is the app's only scheduler: there is no
+# cron daemon in the container and the machine may be stopped, so the request both
+# wakes it and drives the cycle.
+#
+# Known limits, accepted at hourly granularity: GitHub's scheduled runs are
+# best-effort and can be delayed by several minutes, and schedules are disabled
+# automatically after 60 days of repository inactivity.
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly, UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never overlap cycles. The endpoint is idempotent, but serialising keeps logs
+  # readable.
+  group: poll-trigger
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: trigger poll cycle
+        env:
+          APP_URL: ${{ vars.APP_URL || 'https://north-landing-badges.fly.dev' }}
+          POLL_TRIGGER_TOKEN: ${{ secrets.POLL_TRIGGER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POLL_TRIGGER_TOKEN}" ]; then
+            echo "POLL_TRIGGER_TOKEN secret is not set; the app would reject this with 401."
+            exit 1
+          fi
+
+          # The machine may be scaled to zero, so allow generous connect time for
+          # the cold start, and retry once on a transient failure.
+          http_code=0
+          for attempt in 1 2 3; do
+            http_code="$(curl -sS -o response.json -w '%{http_code}' \
+              --max-time 300 --connect-timeout 30 \
+              -X POST "$APP_URL/tasks/poll" \
+              -H "Authorization: Bearer $POLL_TRIGGER_TOKEN" \
+              -H 'Content-Length: 0' || echo 000)"
+            if [ "$http_code" = "200" ]; then
+              break
+            fi
+            echo "attempt $attempt returned HTTP $http_code"
+            [ "$attempt" -lt 3 ] && sleep 10
+          done
+
+          echo "HTTP $http_code"
+          cat response.json || true
+          echo
+
+          if [ "$http_code" != "200" ]; then
+            echo "Poll cycle failed."
+            exit 1
+          fi
+
+          # Surface the cycle summary in the Actions log.
+          {
+            echo "### Poll cycle"
+            echo '```json'
+            cat response.json
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          jq -e '.failed == 0' response.json > /dev/null || {
+            echo "Cycle reported per-registration failures; see the report above."
+            exit 1
+          }

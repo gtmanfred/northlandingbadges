@@ -1,0 +1,86 @@
+name: deploy
+
+# Deploys only after ci.yml succeeds on the default branch. workflow_run fires
+# with the CI run's conclusion attached, so a red CI run can never deploy
+# (spec §6).
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # For workflow_run, refuse anything but a successful CI run.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: guard against deploying a red CI run
+        if: github.event_name == 'workflow_run'
+        run: |
+          echo "Triggering CI run: ${{ github.event.workflow_run.id }}"
+          echo "Conclusion:        ${{ github.event.workflow_run.conclusion }}"
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "CI was not green; refusing to deploy."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          # Deploy exactly the commit CI validated.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: fly deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only \
+            --build-arg VERSION="${{ github.event.workflow_run.head_sha || github.sha }}"
+
+      - name: post-deploy smoke test
+        env:
+          APP_URL: ${{ vars.APP_URL || 'https://north-landing-badges.fly.dev' }}
+          # Set this repo variable to the mode you expect in production. Left unset
+          # it defaults to live, so a deploy accidentally left in dry_run or
+          # allowlist fails here rather than silently swallowing real badges.
+          EXPECTED_EMAIL_MODE: ${{ vars.EXPECTED_EMAIL_MODE || 'live' }}
+        run: |
+          set -euo pipefail
+          echo "Waking $APP_URL/healthz"
+          for attempt in 1 2 3 4 5 6; do
+            if body="$(curl -fsS --max-time 30 "$APP_URL/healthz")"; then
+              break
+            fi
+            echo "attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
+          echo "$body"
+
+          status="$(echo "$body" | jq -r '.status')"
+          mode="$(echo "$body" | jq -r '.email_mode')"
+          version="$(echo "$body" | jq -r '.version')"
+          echo "status=$status email_mode=$mode version=$version"
+
+          if [ "$status" != "ok" ]; then
+            echo "Health status is not ok"
+            exit 1
+          fi
+          if [ "$mode" != "$EXPECTED_EMAIL_MODE" ]; then
+            echo "Deployed EMAIL_MODE is '$mode' but '$EXPECTED_EMAIL_MODE' was expected."
+            echo "Fix with: fly secrets set EMAIL_MODE=$EXPECTED_EMAIL_MODE (or unset it for live)."
+            exit 1
+          fi
+          echo "Smoke test passed: live app reports email_mode=$mode"
