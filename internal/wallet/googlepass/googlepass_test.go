@@ -217,6 +217,35 @@ func TestNewIssuerRejectsBadConfig(t *testing.T) {
 	}
 }
 
+func TestNewIssuerSkipsCertificateBlocksInKeyPEM(t *testing.T) {
+	t.Parallel()
+	// A service-account PEM sometimes arrives with its certificate concatenated
+	// ahead of the key; the key must still be found.
+	cfg := testConfig()
+	cfg.KeyPEM = testkeys.ApplePassCertPEM() + testkeys.GoogleServiceAccountKeyPEM()
+
+	issuer, err := googlepass.NewIssuer(cfg)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	if _, err := googlepass.Verify(jwt, issuer.PublicKey()); err != nil {
+		t.Errorf("Verify: %v", err)
+	}
+}
+
+func TestNewIssuerRejectsCertificateOnlyPEM(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.KeyPEM = testkeys.ApplePassCertPEM()
+	if _, err := googlepass.NewIssuer(cfg); err == nil {
+		t.Fatal("expected error when the PEM holds no private key")
+	}
+}
+
 func TestSaveJWTRejectsIncompleteBadge(t *testing.T) {
 	t.Parallel()
 	issuer, err := googlepass.NewIssuer(testConfig())

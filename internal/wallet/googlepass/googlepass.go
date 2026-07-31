@@ -193,11 +193,17 @@ func sanitizeID(raw string) string {
 }
 
 func parseRSAKey(pemData string) (*rsa.PrivateKey, error) {
-	for rest := []byte(pemData); len(rest) > 0; {
+	rest := []byte(pemData)
+	for {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
 		if block == nil {
-			break
+			return nil, errors.New("no private key block found")
+		}
+		// A service-account PEM sometimes ships alongside its certificate; skip
+		// anything that is not a key block.
+		if strings.Contains(block.Type, "CERTIFICATE") {
+			continue
 		}
 		if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 			return key, nil
@@ -212,7 +218,6 @@ func parseRSAKey(pemData string) (*rsa.PrivateKey, error) {
 		}
 		return rsaKey, nil
 	}
-	return nil, errors.New("no private key block found")
 }
 
 // Verify checks a save JWT's RS256 signature against pub and returns its raw
