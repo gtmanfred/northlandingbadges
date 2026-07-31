@@ -155,7 +155,7 @@ func buildService(cfg *config.Config, db *store.Store, log *slog.Logger) (*poll.
 	}
 
 	if cfg.DGS.Configured() {
-		client, err := dgs.NewClient(cfg.DGS, cfg.ClubTimezone, log)
+		client, err := dgs.NewExportClient(cfg.DGS, cfg.ClubTimezone, log)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +163,7 @@ func buildService(cfg *config.Config, db *store.Store, log *slog.Logger) (*poll.
 	} else {
 		// Webhook-only deployment (Option A). Poll cycles stay valid no-ops so the
 		// hourly trigger and its smoke value are preserved.
-		log.Warn("DGS_ROSTER_URL is unset: poll cycles will find no registrations; ingestion depends on the webhook")
+		log.Warn("DGS export is not configured (need DGS_EVENT_SLUG, DGS_SEASON_YEAR, DGS_EMAIL, DGS_PASSWORD): poll cycles will find no registrations; ingestion depends on the webhook")
 		svc.Fetcher = emptyFetcher{}
 	}
 
@@ -190,7 +190,7 @@ func buildService(cfg *config.Config, db *store.Store, log *slog.Logger) (*poll.
 	return svc, nil
 }
 
-// emptyFetcher stands in when roster polling is not configured.
+// emptyFetcher stands in when the export is not configured.
 type emptyFetcher struct{}
 
-func (emptyFetcher) Fetch(context.Context) ([]domain.Registration, []error) { return nil, nil }
+func (emptyFetcher) Fetch(context.Context) ([]domain.Candidate, []error) { return nil, nil }

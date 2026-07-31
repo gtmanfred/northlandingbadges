@@ -3,6 +3,7 @@ package poll_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/mail"
@@ -35,14 +36,14 @@ func clubTZ(t *testing.T) *time.Location {
 }
 
 type fakeFetcher struct {
-	regs []domain.Registration
-	errs []error
-	hits atomic.Int64
+	candidates []domain.Candidate
+	errs       []error
+	hits       atomic.Int64
 }
 
-func (f *fakeFetcher) Fetch(context.Context) ([]domain.Registration, []error) {
+func (f *fakeFetcher) Fetch(context.Context) ([]domain.Candidate, []error) {
 	f.hits.Add(1)
-	return f.regs, f.errs
+	return f.candidates, f.errs
 }
 
 type recordingTransport struct {
@@ -82,6 +83,13 @@ func dayPass(id, email string, purchased time.Time) domain.Registration {
 	}
 }
 
+// dayCandidate pairs a day-pass registration with the pass type ingest would
+// have classified it to, since the fetcher now hands the pipeline candidates
+// rather than raw registrations.
+func dayCandidate(id, email string, purchased time.Time) domain.Candidate {
+	return domain.Candidate{Registration: dayPass(id, email, purchased), PassType: domain.PassTypeDay}
+}
+
 type harness struct {
 	svc       *poll.Service
 	store     *store.Store
@@ -89,7 +97,7 @@ type harness struct {
 	fetcher   *fakeFetcher
 }
 
-func newHarness(t *testing.T, mode config.EmailMode, allowlist []string, redirectTo string, regs []domain.Registration, ingestErrs []error) *harness {
+func newHarness(t *testing.T, mode config.EmailMode, allowlist []string, redirectTo string, candidates []domain.Candidate, ingestErrs []error) *harness {
 	t.Helper()
 	ny := clubTZ(t)
 
@@ -127,7 +135,7 @@ func newHarness(t *testing.T, mode config.EmailMode, allowlist []string, redirec
 		t.Fatalf("googlepass.NewIssuer: %v", err)
 	}
 
-	fetcher := &fakeFetcher{regs: regs, errs: ingestErrs}
+	fetcher := &fakeFetcher{candidates: candidates, errs: ingestErrs}
 	return &harness{
 		svc: &poll.Service{
 			Fetcher: fetcher, Store: st, Mailer: m, Apple: signer, Google: issuer,
@@ -140,12 +148,15 @@ func newHarness(t *testing.T, mode config.EmailMode, allowlist []string, redirec
 func TestRunCycleEndToEnd(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 		{
-			ID: "DGS-2", Name: "Robin Rollaway", Email: "robin@example.com",
-			RawPassType: "2026 Season Membership", SeasonYear: 2026,
-			PurchasedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, ny),
+			Registration: domain.Registration{
+				ID: "DGS-2", Name: "Robin Rollaway", Email: "robin@example.com",
+				RawPassType: "2026 Season Membership", SeasonYear: 2026,
+				PurchasedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, ny),
+			},
+			PassType: domain.PassTypeSeason,
 		},
 	}, nil)
 
@@ -202,8 +213,8 @@ func TestRunCycleEndToEnd(t *testing.T) {
 func TestRunCycleIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 
 	if _, err := h.svc.RunCycle(context.Background()); err != nil {
@@ -224,8 +235,8 @@ func TestRunCycleIsIdempotent(t *testing.T) {
 func TestConcurrentCyclesSendOnce(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-RACE", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-RACE", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 
 	const workers = 8
@@ -257,10 +268,10 @@ func TestConcurrentCyclesSendOnce(t *testing.T) {
 func TestRunCycleAllowlistMailsOnlyTester(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeAllowlist, []string{"tester@example.com"}, "", []domain.Registration{
-		dayPass("DGS-1", "tester@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
-		dayPass("DGS-2", "real@user.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
-		dayPass("DGS-3", "another@user.com", time.Date(2026, 7, 4, 12, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeAllowlist, []string{"tester@example.com"}, "", []domain.Candidate{
+		dayCandidate("DGS-1", "tester@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+		dayCandidate("DGS-2", "real@user.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
+		dayCandidate("DGS-3", "another@user.com", time.Date(2026, 7, 4, 12, 0, 0, 0, ny)),
 	}, nil)
 
 	report, err := h.svc.RunCycle(context.Background())
@@ -293,9 +304,9 @@ func TestRunCycleAllowlistMailsOnlyTester(t *testing.T) {
 func TestRunCycleDryRunSendsNothingButGeneratesPasses(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeDryRun, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
-		dayPass("DGS-2", "robin@example.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeDryRun, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+		dayCandidate("DGS-2", "robin@example.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
 	}, nil)
 
 	report, err := h.svc.RunCycle(context.Background())
@@ -323,9 +334,9 @@ func TestRunCycleDryRunSendsNothingButGeneratesPasses(t *testing.T) {
 func TestRunCycleRedirectsEveryMessage(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeRedirect, nil, "qa@example.com", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
-		dayPass("DGS-2", "robin@example.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeRedirect, nil, "qa@example.com", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+		dayCandidate("DGS-2", "robin@example.com", time.Date(2026, 7, 4, 11, 0, 0, 0, ny)),
 	}, nil)
 
 	report, err := h.svc.RunCycle(context.Background())
@@ -342,15 +353,24 @@ func TestRunCycleRedirectsEveryMessage(t *testing.T) {
 	}
 }
 
+// TestRunCycleReportsUnclassifiedWithoutClaiming covers RunCycle's own defense
+// against a candidate that carries a pass type ProcessClassified does not
+// recognize. Ingest is now the only place that classifies a raw label, so this
+// can no longer happen from a bad RawPassType — but a Candidate is still a
+// value the fetcher hands over, and a bug there must not silently claim (and
+// thus never retry) the registration.
 func TestRunCycleReportsUnclassifiedWithoutClaiming(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
 		{
-			ID: "DGS-T", Name: "Jamie Jomez", Email: "jamie@example.com",
-			RawPassType: "Tournament Entry", PurchasedAt: time.Date(2026, 6, 12, 17, 30, 0, 0, ny),
+			Registration: domain.Registration{
+				ID: "DGS-T", Name: "Jamie Jomez", Email: "jamie@example.com",
+				RawPassType: "Tournament Entry", PurchasedAt: time.Date(2026, 6, 12, 17, 30, 0, 0, ny),
+			},
+			PassType: domain.PassType("tournament_entry"),
 		},
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 
 	report, err := h.svc.RunCycle(context.Background())
@@ -370,8 +390,8 @@ func TestRunCycleReportsUnclassifiedWithoutClaiming(t *testing.T) {
 func TestRunCycleReleasesClaimWhenDeliveryFails(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 	h.transport.err = errors.New("smtp down")
 
@@ -424,8 +444,8 @@ func TestRunCycleSurfacesIngestFailure(t *testing.T) {
 func TestRunCycleKeepsGoingAfterRowWarnings(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, []error{errors.New("row 4: missing email")})
 
 	report, err := h.svc.RunCycle(context.Background())
@@ -466,8 +486,8 @@ func TestRunCycleRequiresDependencies(t *testing.T) {
 func TestRunCycleWithoutWalletBuildersStillMails(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 	h.svc.Apple = nil
 	h.svc.Google = nil
@@ -487,8 +507,8 @@ func TestRunCycleWithoutWalletBuildersStillMails(t *testing.T) {
 func TestRunCycleStopsOnCancelledContext(t *testing.T) {
 	t.Parallel()
 	ny := clubTZ(t)
-	h := newHarness(t, config.ModeLive, nil, "", []domain.Registration{
-		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 	}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -557,5 +577,66 @@ func TestProcessClassifiedSeasonUsesRegistrationSeasonYear(t *testing.T) {
 	}
 	if got := outcome.ExpiresAt.Year(); got != 2026 {
 		t.Errorf("expiry year = %d, want 2026 (season year, not purchase year)", got)
+	}
+}
+
+func TestRunCycleUsesCandidatePassTypes(t *testing.T) {
+	t.Parallel()
+	ny := clubTZ(t)
+	h := newHarness(t, config.ModeLive, nil, "", []domain.Candidate{
+		{
+			Registration: domain.Registration{
+				ID: "abc123", Name: "Dana Discraft", Email: "dana@example.com",
+				RawPassType: "FNDR", SeasonYear: 2026,
+				PurchasedAt: time.Date(2025, 11, 13, 1, 7, 26, 0, ny),
+			},
+			PassType: domain.PassTypeFounder,
+		},
+		{
+			Registration: domain.Registration{
+				ID: "def456", Name: "Sam Sponsor", Email: "sam@example.com",
+				RawPassType: "SPON", SeasonYear: 2026,
+				PurchasedAt: time.Date(2026, 2, 20, 19, 45, 0, 0, ny),
+			},
+			PassType: domain.PassTypeSponsor,
+		},
+	}, nil)
+
+	report, err := h.svc.RunCycle(context.Background())
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+	if report.Fetched != 2 || report.Processed != 2 || report.Sent != 2 {
+		t.Fatalf("report = %+v", report)
+	}
+
+	founder, err := h.store.Get(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if founder.PassType != string(domain.PassTypeFounder) {
+		t.Errorf("founder pass type = %q", founder.PassType)
+	}
+	if !founder.ExpiresAt.IsZero() {
+		t.Errorf("founder expiry = %s, want zero", founder.ExpiresAt)
+	}
+
+	sponsor, err := h.store.Get(context.Background(), "def456")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if want := time.Date(2026, 12, 31, 23, 59, 59, 0, ny); !sponsor.ExpiresAt.Equal(want) {
+		t.Errorf("sponsor expiry = %s, want %s", sponsor.ExpiresAt, want)
+	}
+}
+
+func TestRunCycleCountsUnknownDivisionAsUnclassified(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, config.ModeLive, nil, "", nil,
+		[]error{fmt.Errorf("row 6: %w: division %q", domain.ErrUnknownPassType, "PRO")})
+
+	report, err := h.svc.RunCycle(context.Background())
+	if err == nil && report.Unclassified != 1 {
+		t.Fatalf("report = %+v, want Unclassified 1", report)
 	}
 }

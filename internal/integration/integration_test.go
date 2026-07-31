@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -36,7 +35,68 @@ import (
 
 const pollToken = "poll-trigger-token"
 
+// The membership export identifies an event by slug, not by URL path, so the
+// fake server and the client config must agree on these out of band.
+const (
+	dgsEventSlug  = "Slug"
+	dgsSeasonYear = 2026
+	dgsEmail      = "club-admin@example.com"
+	dgsPassword   = "dgs-admin-password"
+)
+
+// membershipExportCSV stands in for the club-admin CSV export. It carries one
+// row per tier the pipeline needs to cover (MEM, SPON, FNDR) plus a division
+// the club has never used, which must surface as an ingest warning rather than
+// a badge — the export has no day passes, unlike the retired HTML roster page.
+const membershipExportCSV = "Division,Name,Email,Registration date EST\n" +
+	"MEM,Casey Chains,casey@example.com,2026-07-04 10:15:00\n" +
+	"SPON,Robin Rollaway,robin@example.com,2026-04-01 08:02:00\n" +
+	"FNDR,Dana Discraft,dana@example.com,2026-12-31 21:40:00\n" +
+	"PRO,Jamie Jomez,jamie@example.com,2026-06-12 17:30:00\n" +
+	"Totals,,,\n"
+
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// idFor derives the registration ID the export client computes for an email,
+// so tests can look up store records without hard-coding a hash.
+func idFor(email string) string { return dgs.RegistrationID(dgsEventSlug, email) }
+
+// newFakeDGS emulates DiscGolfScene's authenticated CSV export closely enough
+// for the pipeline to exercise its real login-then-export flow: a sign-in form
+// that sets a session cookie, and an admin export endpoint that demands it.
+func newFakeDGS(t *testing.T, hits *atomic.Int32) config.DGSConfig {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth/sign-in", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if r.PostFormValue("auth_email") != dgsEmail || r.PostFormValue("auth_password") != dgsPassword {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "dgs_session", Value: "ok", Path: "/"})
+	})
+	mux.HandleFunc("/tournaments/"+dgsEventSlug+"/admin/registration-export", func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if _, err := r.Cookie("dgs_session"); err != nil {
+			// An unauthenticated export answers with the sign-in page, per the
+			// real DiscGolfScene behaviour the client's re-login retry expects.
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html><form class="form-signin"></form></html>`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write([]byte(membershipExportCSV))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return config.DGSConfig{
+		BaseURL: srv.URL, EventSlug: dgsEventSlug, SeasonYear: dgsSeasonYear,
+		Email: dgsEmail, Password: dgsPassword,
+	}
+}
 
 type stack struct {
 	client   *http.Client
@@ -58,18 +118,8 @@ func newStack(t *testing.T, mode config.EmailMode, allowlist []string, redirectT
 		t.Fatalf("LoadLocation: %v", err)
 	}
 
-	// Recorded DiscGolfScene orders page.
-	fixture, err := os.ReadFile(filepath.Join("..", "dgs", "testdata", "orders.html"))
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
 	var hits atomic.Int32
-	dgsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = w.Write(fixture)
-	}))
-	t.Cleanup(dgsServer.Close)
+	dgsConfig := newFakeDGS(t, &hits)
 
 	smtpServer, err := smtptest.Start(smtptest.Options{
 		RequireAuth: true, Username: "club@gmail.com", Password: "app-password",
@@ -98,7 +148,7 @@ func newStack(t *testing.T, mode config.EmailMode, allowlist []string, redirectT
 		SMTPAddr:         smtpServer.Addr(),
 		FromName:         "North Landing DGC",
 		ClubTimezone:     ny,
-		DGS:              config.DGSConfig{RosterURL: dgsServer.URL},
+		DGS:              dgsConfig,
 		Apple: config.AppleConfig{
 			PassTypeIdentifier: "pass.com.northlanding.badge",
 			TeamIdentifier:     "TESTTEAM01",
@@ -126,9 +176,9 @@ func newStack(t *testing.T, mode config.EmailMode, allowlist []string, redirectT
 	deliverer := mailer.New(guard, transport,
 		mail.Address{Name: cfg.FromName, Address: cfg.GmailUser}, quietLogger())
 
-	fetcher, err := dgs.NewClient(cfg.DGS, ny, quietLogger())
+	fetcher, err := dgs.NewExportClient(cfg.DGS, ny, quietLogger())
 	if err != nil {
-		t.Fatalf("dgs.NewClient: %v", err)
+		t.Fatalf("dgs.NewExportClient: %v", err)
 	}
 	signer, err := applepass.NewSigner(cfg.Apple)
 	if err != nil {
@@ -194,9 +244,11 @@ func TestPollCycleEndToEndDeliversBadges(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
-	// The fixture holds four parseable rows; one is a tournament entry that must
-	// not classify, so three badges go out.
-	if report.Fetched != 4 || report.Sent != 3 || report.Unclassified != 1 {
+	// The export holds three membership rows (MEM/SPON/FNDR) plus one row with a
+	// division the club has never used. That row fails classification during
+	// ingest, so it never becomes a candidate — it counts as unclassified but not
+	// fetched — and three badges go out.
+	if report.Fetched != 3 || report.Sent != 3 || report.Unclassified != 1 {
 		t.Fatalf("report = %+v", report)
 	}
 
@@ -224,36 +276,39 @@ func TestPollCycleEndToEndDeliversBadges(t *testing.T) {
 		}
 	}
 
-	// Day Pass expiration is purchase date + 1 day at 23:59:59 club-local.
+	// The export has no day passes, so casey's badge is now a season member; the
+	// wallet-delivery assertions that used to ride on her day pass move here.
 	casey := decodeQP(string(byRecipient["casey@example.com"].Data))
-	if !strings.Contains(casey, "Sun, Jul 5 2026 at 11:59 PM EDT") {
-		t.Error("day pass email does not carry the calculated expiration")
+	if !strings.Contains(casey, "Thu, Dec 31 2026 at 11:59 PM EST") {
+		t.Error("member email does not carry the Dec 31 expiration")
 	}
 	if !strings.Contains(casey, "Add to Apple Wallet") || !strings.Contains(casey, "Save to Google Wallet") {
-		t.Error("day pass email is missing wallet buttons")
+		t.Error("member email is missing wallet buttons")
 	}
 	if !strings.Contains(casey, "application/vnd.apple.pkpass") {
-		t.Error("day pass email has no .pkpass attachment")
+		t.Error("member email has no .pkpass attachment")
 	}
 
-	// Season membership expires Dec 31 of the purchase year.
+	// Sponsor badges expire with the season, exactly like a member's.
 	robin := decodeQP(string(byRecipient["robin@example.com"].Data))
 	if !strings.Contains(robin, "Thu, Dec 31 2026 at 11:59 PM EST") {
-		t.Error("season email does not carry the Dec 31 expiration")
+		t.Error("sponsor email does not carry the Dec 31 expiration")
 	}
 
-	// A Dec 31 purchase still expires that same Dec 31.
+	// Founder badges never expire, even for a founder who joined at the very end
+	// of the season.
 	dana := decodeQP(string(byRecipient["dana@example.com"].Data))
-	if !strings.Contains(dana, "Thu, Dec 31 2026 at 11:59 PM EST") {
-		t.Error("year-end season purchase has the wrong expiration")
+	if !strings.Contains(dana, "Never") {
+		t.Error("founder email should say the badge never expires")
 	}
 
 	// The Apple pass is downloadable from the link in the email.
-	art, err := s.store.Artifact(context.Background(), "DGS-88231")
+	caseyID := idFor("casey@example.com")
+	art, err := s.store.Artifact(context.Background(), caseyID)
 	if err != nil {
 		t.Fatalf("Artifact: %v", err)
 	}
-	resp, err := s.client.Get(s.baseURL + "/passes/DGS-88231.pkpass?t=" + art.AccessToken)
+	resp, err := s.client.Get(s.baseURL + "/passes/" + caseyID + ".pkpass?t=" + art.AccessToken)
 	if err != nil {
 		t.Fatalf("download pass: %v", err)
 	}
@@ -340,7 +395,8 @@ func TestAllowlistModeMailsOnlyTester(t *testing.T) {
 	}
 
 	// Suppressed registrants are recorded so a later live run cannot re-mail them.
-	for _, id := range []string{"DGS-88232", "DGS-88233"} {
+	for _, email := range []string{"robin@example.com", "dana@example.com"} {
+		id := idFor(email)
 		rec, err := s.store.Get(context.Background(), id)
 		if err != nil {
 			t.Fatalf("Get(%s): %v", id, err)
@@ -366,7 +422,7 @@ func TestDryRunModeSendsZeroSMTPMessages(t *testing.T) {
 		t.Fatalf("dry_run opened %d SMTP transactions, want 0", s.smtp.Count())
 	}
 	// Passes were still generated, so the run exercised the full pipeline.
-	art, err := s.store.Artifact(context.Background(), "DGS-88231")
+	art, err := s.store.Artifact(context.Background(), idFor("casey@example.com"))
 	if err != nil {
 		t.Fatalf("Artifact: %v", err)
 	}
