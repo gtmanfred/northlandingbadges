@@ -144,7 +144,8 @@ func TestRunCycleEndToEnd(t *testing.T) {
 		dayPass("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny)),
 		{
 			ID: "DGS-2", Name: "Robin Rollaway", Email: "robin@example.com",
-			RawPassType: "2026 Season Membership", PurchasedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, ny),
+			RawPassType: "2026 Season Membership", SeasonYear: 2026,
+			PurchasedAt: time.Date(2026, 4, 1, 8, 0, 0, 0, ny),
 		},
 	}, nil)
 
@@ -497,5 +498,64 @@ func TestRunCycleStopsOnCancelledContext(t *testing.T) {
 	}
 	if h.transport.count() != 0 {
 		t.Error("cancelled cycle sent mail")
+	}
+}
+
+func TestProcessClassifiedSkipsSecondFounderBadge(t *testing.T) {
+	t.Parallel()
+	ny := clubTZ(t)
+	ctx := context.Background()
+	h := newHarness(t, config.ModeLive, nil, "", nil, nil)
+
+	first := domain.Registration{
+		ID: "reg-2025", Name: "A Founder", Email: "founder@example.com",
+		RawPassType: "FNDR", SeasonYear: 2025,
+		PurchasedAt: time.Date(2024, 11, 20, 9, 0, 0, 0, ny),
+	}
+	if _, err := h.svc.ProcessClassified(ctx, first, domain.PassTypeFounder); err != nil {
+		t.Fatalf("first founder registration: %v", err)
+	}
+
+	second := domain.Registration{
+		ID: "reg-2026", Name: "A Founder", Email: "founder@example.com",
+		RawPassType: "FNDR", SeasonYear: 2026,
+		PurchasedAt: time.Date(2025, 11, 13, 1, 7, 27, 0, ny),
+	}
+	outcome, err := h.svc.ProcessClassified(ctx, second, domain.PassTypeFounder)
+	if err != nil {
+		t.Fatalf("second founder registration: %v", err)
+	}
+	if outcome.Action != mailer.ActionFounderExisting {
+		t.Errorf("action = %q, want %q", outcome.Action, mailer.ActionFounderExisting)
+	}
+
+	rec, err := h.store.Get(ctx, "reg-2026")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if rec.Action != string(mailer.ActionFounderExisting) {
+		t.Errorf("stored action = %q, want %q", rec.Action, mailer.ActionFounderExisting)
+	}
+	if h.transport.count() != 1 {
+		t.Errorf("emails sent = %d, want 1", h.transport.count())
+	}
+}
+
+func TestProcessClassifiedSeasonUsesRegistrationSeasonYear(t *testing.T) {
+	t.Parallel()
+	ny := clubTZ(t)
+	h := newHarness(t, config.ModeLive, nil, "", nil, nil)
+
+	reg := domain.Registration{
+		ID: "reg-1", Name: "A Member", Email: "m@example.com",
+		RawPassType: "MEM", SeasonYear: 2026,
+		PurchasedAt: time.Date(2025, 11, 13, 1, 7, 27, 0, ny),
+	}
+	outcome, err := h.svc.ProcessClassified(context.Background(), reg, domain.PassTypeSeason)
+	if err != nil {
+		t.Fatalf("ProcessClassified: %v", err)
+	}
+	if got := outcome.ExpiresAt.Year(); got != 2026 {
+		t.Errorf("expiry year = %d, want 2026 (season year, not purchase year)", got)
 	}
 }

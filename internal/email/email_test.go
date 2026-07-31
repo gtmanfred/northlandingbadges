@@ -162,11 +162,8 @@ func TestRenderValidates(t *testing.T) {
 	if _, err := email.Render(email.Data{}); err == nil {
 		t.Error("expected error for empty data")
 	}
-	d := testData()
-	d.Badge.ExpiresAt = time.Time{}
-	if _, err := email.Render(d); err == nil {
-		t.Error("expected error without expiration")
-	}
+	// A missing expiration is no longer an error: founder badges never expire.
+	// See TestRenderNonExpiringBadge.
 }
 
 func TestMIMEStructure(t *testing.T) {
@@ -332,5 +329,28 @@ func TestMIMERequiresRecipients(t *testing.T) {
 	}
 	if _, err := msg.MIME(email.MIMEOptions{From: mail.Address{Address: "club@gmail.com"}}); err == nil {
 		t.Error("expected error with no recipients")
+	}
+}
+
+func TestRenderNonExpiringBadge(t *testing.T) {
+	t.Parallel()
+	msg, err := email.Render(email.Data{
+		Badge: domain.Badge{
+			Registration: domain.Registration{
+				ID: "reg-1", Name: "A Founder", Email: "f@example.com",
+				PurchasedAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+			},
+			PassType: domain.PassTypeFounder,
+		},
+		Location: time.UTC,
+	})
+	if err != nil {
+		t.Fatalf("Render for a non-expiring badge = %v, want nil", err)
+	}
+	if !strings.Contains(msg.Text, "Never") {
+		t.Errorf("plain-text body should say the badge never expires, got:\n%s", msg.Text)
+	}
+	if strings.Contains(msg.Subject, "expires") {
+		t.Errorf("subject should not promise an expiry date for a founder badge, got %q", msg.Subject)
 	}
 }

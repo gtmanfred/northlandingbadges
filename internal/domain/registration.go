@@ -16,6 +16,12 @@ const (
 	PassTypeDay PassType = "day_pass"
 	// PassTypeSeason is a season membership for a calendar year.
 	PassTypeSeason PassType = "season_membership"
+	// PassTypeFounder is a Course Founder membership. Founder badges never
+	// expire, so their Badge.ExpiresAt is the zero time.
+	PassTypeFounder PassType = "founder"
+	// PassTypeSponsor is a Course Sponsor membership. It expires with the season,
+	// exactly like a season membership.
+	PassTypeSponsor PassType = "sponsor"
 )
 
 // ErrUnknownPassType is returned when a registration's pass label cannot be
@@ -30,6 +36,10 @@ func (p PassType) Label() string {
 		return "Day Pass"
 	case PassTypeSeason:
 		return "Season Member"
+	case PassTypeFounder:
+		return "Founder"
+	case PassTypeSponsor:
+		return "Course Sponsor"
 	default:
 		return string(p)
 	}
@@ -49,6 +59,11 @@ type Registration struct {
 	// PurchasedAt is the purchase instant; expiration is derived from its
 	// calendar date in the club's timezone.
 	PurchasedAt time.Time
+	// SeasonYear is the membership season the registration belongs to, taken from
+	// the DiscGolfScene event rather than the purchase date: 2026-season
+	// registrations begin in November 2025, so the purchase year is wrong. Zero
+	// for day passes, which expire relative to the purchase date.
+	SeasonYear int
 }
 
 // Validate reports whether the registration carries the fields the pipeline
@@ -91,3 +106,7 @@ type Badge struct {
 	PassType     PassType
 	ExpiresAt    time.Time
 }
+
+// Expires reports whether the badge has an expiration at all. Founder badges do
+// not, and a zero ExpiresAt must never be formatted as a real date.
+func (b Badge) Expires() bool { return !b.ExpiresAt.IsZero() }

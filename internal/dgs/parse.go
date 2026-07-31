@@ -77,6 +77,12 @@ func ParseWebhook(body []byte, loc *time.Location) (domain.Registration, domain.
 		return domain.Registration{}, "", err
 	}
 	reg.PurchasedAt = purchasedAt
+	// A season year in the item label is the only season signal a webhook carries;
+	// without it a season membership is rejected rather than expiring by purchase
+	// year.
+	if year, ok := SeasonYearFromLabel(reg.RawPassType); ok {
+		reg.SeasonYear = year
+	}
 
 	if err := reg.Validate(); err != nil {
 		return domain.Registration{}, "", fmt.Errorf("dgs: %w", err)
@@ -211,6 +217,9 @@ func registrationFromRow(cells []string, index map[string]int, loc *time.Locatio
 		return domain.Registration{}, err
 	}
 	reg.PurchasedAt = purchasedAt
+	if year, ok := SeasonYearFromLabel(reg.RawPassType); ok {
+		reg.SeasonYear = year
+	}
 
 	if err := reg.Validate(); err != nil {
 		return domain.Registration{}, err

@@ -57,17 +57,18 @@ type Service struct {
 // Report summarizes a cycle. It is returned as the poll endpoint's JSON body so
 // the GitHub Actions log shows what happened.
 type Report struct {
-	Fetched       int      `json:"fetched"`
-	Processed     int      `json:"processed"`
-	AlreadySeen   int      `json:"already_seen"`
-	Sent          int      `json:"sent"`
-	SkippedGuard  int      `json:"skipped_by_guard"`
-	Redirected    int      `json:"redirected"`
-	DryRun        int      `json:"dry_run"`
-	Unclassified  int      `json:"unclassified"`
-	Failed        int      `json:"failed"`
-	IngestWarning []string `json:"ingest_warnings,omitempty"`
-	Errors        []string `json:"errors,omitempty"`
+	Fetched        int      `json:"fetched"`
+	Processed      int      `json:"processed"`
+	AlreadySeen    int      `json:"already_seen"`
+	Sent           int      `json:"sent"`
+	SkippedGuard   int      `json:"skipped_by_guard"`
+	Redirected     int      `json:"redirected"`
+	DryRun         int      `json:"dry_run"`
+	Unclassified   int      `json:"unclassified"`
+	SkippedFounder int      `json:"skipped_founder_existing"`
+	Failed         int      `json:"failed"`
+	IngestWarning  []string `json:"ingest_warnings,omitempty"`
+	Errors         []string `json:"errors,omitempty"`
 }
 
 // Outcome is the result of processing a single registration.
@@ -136,13 +137,16 @@ func (s *Service) RunCycle(ctx context.Context) (Report, error) {
 			report.Redirected++
 		case mailer.ActionDryRun:
 			report.DryRun++
+		case mailer.ActionFounderExisting:
+			report.SkippedFounder++
 		}
 	}
 
 	log.Info("poll cycle complete",
 		"fetched", report.Fetched, "processed", report.Processed, "already_seen", report.AlreadySeen,
 		"sent", report.Sent, "skipped_by_guard", report.SkippedGuard, "redirected", report.Redirected,
-		"dry_run", report.DryRun, "unclassified", report.Unclassified, "failed", report.Failed)
+		"dry_run", report.DryRun, "unclassified", report.Unclassified,
+		"skipped_founder_existing", report.SkippedFounder, "failed", report.Failed)
 	return report, nil
 }
 
@@ -194,7 +198,35 @@ func (s *Service) ProcessClassified(ctx context.Context, reg domain.Registration
 func (s *Service) build(ctx context.Context, reg domain.Registration, passType domain.PassType) (Outcome, error) {
 	loc := s.location()
 
-	expiresAt, err := expiry.Calculate(passType, reg.PurchasedAt, loc)
+	// Founder badges never expire, so a founder who re-registers in a later season
+	// must not receive a second one. The registration is still recorded, which
+	// keeps the cycle idempotent.
+	if passType == domain.PassTypeFounder {
+		issued, err := s.Store.FounderIssued(ctx, reg.Email)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if issued {
+			if err := s.Store.MarkProcessed(ctx, store.Record{
+				RegistrationID: reg.ID,
+				Email:          reg.Email,
+				PassType:       string(passType),
+				Action:         string(mailer.ActionFounderExisting),
+				ProcessedAt:    time.Now(),
+			}); err != nil {
+				return Outcome{}, err
+			}
+			s.logger().Info("founder badge already issued; nothing mailed",
+				"registration_id", reg.ID, "email", reg.Email)
+			return Outcome{
+				RegistrationID: reg.ID,
+				Action:         mailer.ActionFounderExisting,
+				PassType:       passType,
+			}, nil
+		}
+	}
+
+	expiresAt, err := expiry.Calculate(passType, reg.PurchasedAt, reg.SeasonYear, loc)
 	if err != nil {
 		return Outcome{}, err
 	}

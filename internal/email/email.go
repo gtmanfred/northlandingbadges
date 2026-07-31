@@ -84,17 +84,19 @@ func Render(d Data) (Message, error) {
 	if err := d.Badge.Registration.Validate(); err != nil {
 		return Message{}, fmt.Errorf("email: %w", err)
 	}
-	if d.Badge.ExpiresAt.IsZero() {
-		return Message{}, errors.New("email: badge has no expiration")
-	}
 	loc := d.Location
 	if loc == nil {
 		loc = time.UTC
 	}
 
-	expiresText := d.Badge.ExpiresAt.In(loc).Format(badge.DateLayout)
-	subject := fmt.Sprintf("%sYour North Landing DGC %s — expires %s",
-		d.SubjectPrefix, d.Badge.PassType.Label(), d.Badge.ExpiresAt.In(loc).Format("Jan 2, 2006"))
+	// Founder badges never expire, so the copy promises no date.
+	expiresText := "Never"
+	subject := fmt.Sprintf("%sYour North Landing DGC %s", d.SubjectPrefix, d.Badge.PassType.Label())
+	if d.Badge.Expires() {
+		expiresText = d.Badge.ExpiresAt.In(loc).Format(badge.DateLayout)
+		subject = fmt.Sprintf("%sYour North Landing DGC %s — expires %s",
+			d.SubjectPrefix, d.Badge.PassType.Label(), d.Badge.ExpiresAt.In(loc).Format("Jan 2, 2006"))
+	}
 
 	td := templateData{
 		Subject:        subject,

@@ -65,9 +65,6 @@ func (s *Signer) Build(b domain.Badge, loc *time.Location) ([]byte, error) {
 	if err := b.Registration.Validate(); err != nil {
 		return nil, fmt.Errorf("applepass: %w", err)
 	}
-	if b.ExpiresAt.IsZero() {
-		return nil, errors.New("applepass: badge has no expiration")
-	}
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -130,7 +127,7 @@ type pass struct {
 	OrganizationName   string    `json:"organizationName"`
 	Description        string    `json:"description"`
 	SerialNumber       string    `json:"serialNumber"`
-	ExpirationDate     string    `json:"expirationDate"`
+	ExpirationDate     string    `json:"expirationDate,omitempty"`
 	LogoText           string    `json:"logoText"`
 	ForegroundColor    string    `json:"foregroundColor"`
 	BackgroundColor    string    `json:"backgroundColor"`
@@ -143,7 +140,23 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
-	expires := b.ExpiresAt.In(loc)
+	// A founder badge never expires: omit expirationDate entirely rather than
+	// formatting a zero time, and say so in the fields Apple renders.
+	expirationDate := ""
+	expiresField := field{Key: "expires", Label: "EXPIRES", Value: "Never"}
+	terms := "Non-transferable. Valid for as long as the club recognises this badge."
+	if b.Expires() {
+		expirationDate = b.ExpiresAt.In(loc).Format(time.RFC3339)
+		expiresField = field{
+			Key:       "expires",
+			Label:     "EXPIRES",
+			Value:     expirationDate,
+			DateStyle: "PKDateStyleMedium",
+			TimeStyle: "PKDateStyleShort",
+		}
+		terms = "Non-transferable. Valid only through the expiration shown."
+	}
+
 	p := pass{
 		FormatVersion:      1,
 		PassTypeIdentifier: s.cfg.PassTypeIdentifier,
@@ -151,7 +164,7 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 		OrganizationName:   s.cfg.OrganizationName,
 		Description:        Description,
 		SerialNumber:       b.Registration.ID,
-		ExpirationDate:     expires.Format(time.RFC3339),
+		ExpirationDate:     expirationDate,
 		LogoText:           "North Landing DGC",
 		ForegroundColor:    "rgb(255,255,255)",
 		BackgroundColor:    "rgb(11,61,46)",
@@ -168,18 +181,10 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 			SecondaryFields: []field{
 				{Key: "passType", Label: "PASS TYPE", Value: b.PassType.Label()},
 			},
-			AuxiliaryFields: []field{
-				{
-					Key:       "expires",
-					Label:     "EXPIRES",
-					Value:     expires.Format(time.RFC3339),
-					DateStyle: "PKDateStyleMedium",
-					TimeStyle: "PKDateStyleShort",
-				},
-			},
+			AuxiliaryFields: []field{expiresField},
 			BackFields: []field{
 				{Key: "registration", Label: "REGISTRATION", Value: b.Registration.ID},
-				{Key: "terms", Label: "TERMS", Value: "Non-transferable. Valid only through the expiration shown."},
+				{Key: "terms", Label: "TERMS", Value: terms},
 			},
 		},
 	}

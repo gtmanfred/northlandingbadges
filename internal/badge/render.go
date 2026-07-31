@@ -31,6 +31,25 @@ var (
 	colorMuted      = color.RGBA{R: 0xB9, G: 0xD4, B: 0xC8, A: 0xFF}
 )
 
+// Tier accent colours. The gold above is North Landing's default; founders and
+// sponsors get their own so the tiers are distinguishable at a glance.
+var (
+	colorAccentFounder = color.RGBA{R: 0xC9, G: 0xD3, B: 0xDB, A: 0xFF}
+	colorAccentSponsor = color.RGBA{R: 0xB8, G: 0x73, B: 0x33, A: 0xFF}
+)
+
+// AccentColor is the accent used for a pass type's artwork.
+func AccentColor(p domain.PassType) color.RGBA {
+	switch p {
+	case domain.PassTypeFounder:
+		return colorAccentFounder
+	case domain.PassTypeSponsor:
+		return colorAccentSponsor
+	default:
+		return colorAccent
+	}
+}
+
 // Width and Height are the badge PNG dimensions.
 const (
 	Width  = 1000
@@ -50,16 +69,24 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 		return nil, fmt.Errorf("badge: %w", err)
 	}
 
+	accent := AccentColor(b.PassType)
+
 	img := image.NewRGBA(image.Rect(0, 0, Width, Height))
 	fill(img, img.Bounds(), colorBackground)
 	// Accent bar down the left edge and a hairline under the header.
-	fill(img, image.Rect(0, 0, 18, Height), colorAccent)
-	fill(img, image.Rect(60, 150, Width-60, 154), colorAccent)
+	fill(img, image.Rect(0, 0, 18, Height), accent)
+	fill(img, image.Rect(60, 150, Width-60, 154), accent)
 
-	drawScaled(img, 60, 60, 3, colorAccent, "NORTH LANDING DGC")
+	// Founder badges have no expiration, so the zero ExpiresAt is never formatted.
+	expiresLine := "NO EXPIRATION"
+	if b.Expires() {
+		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(DateLayout))
+	}
+
+	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
 	drawScaled(img, 60, 200, 5, colorText, strings.ToUpper(truncate(b.Registration.Name, 22)))
-	drawScaled(img, 60, 300, 3, colorAccent, strings.ToUpper(b.PassType.Label()))
-	drawScaled(img, 60, 380, 2, colorMuted, "EXPIRES "+strings.ToUpper(b.ExpiresAt.In(loc).Format(DateLayout)))
+	drawScaled(img, 60, 300, 3, accent, strings.ToUpper(b.PassType.Label()))
+	drawScaled(img, 60, 380, 2, colorMuted, expiresLine)
 	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(b.Registration.ID, 32))
 	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing DGC. Not transferable.")
 

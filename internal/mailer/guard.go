@@ -21,6 +21,9 @@ const (
 	ActionRedirected Action = "redirected"
 	// ActionDryRun means the message is rendered and logged but never sent.
 	ActionDryRun Action = "dry_run"
+	// ActionFounderExisting means the registrant already holds a non-expiring
+	// founder badge, so this later-season registration mails nothing.
+	ActionFounderExisting Action = "skipped_founder_existing"
 )
 
 // Decision is the guard's verdict for one intended recipient.

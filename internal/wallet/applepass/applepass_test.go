@@ -281,10 +281,22 @@ func TestBuildRejectsIncompleteBadge(t *testing.T) {
 	if _, err := signer.Build(domain.Badge{}, time.UTC); err == nil {
 		t.Error("expected error for empty badge")
 	}
-	noExpiry := testBadge()
-	noExpiry.ExpiresAt = time.Time{}
-	if _, err := signer.Build(noExpiry, time.UTC); err == nil {
-		t.Error("expected error for badge without expiration")
+	// A missing expiration is no longer an error: founder badges never expire.
+	// See TestBuildAcceptsNonExpiringBadge.
+}
+
+func TestBuildAcceptsNonExpiringBadge(t *testing.T) {
+	t.Parallel()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	pkpass, err := signer.Build(founderBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("Build for a non-expiring badge = %v, want nil", err)
+	}
+	if len(readZip(t, pkpass)["pass.json"]) == 0 {
+		t.Error(".pkpass has no pass.json")
 	}
 }
 
@@ -308,5 +320,34 @@ func TestSignerWorksWithoutWWDRChain(t *testing.T) {
 	p7.Content = files["manifest.json"]
 	if err := p7.Verify(); err != nil {
 		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func founderBadge() domain.Badge {
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+	return b
+}
+
+func TestPassJSONOmitsExpirationForFounder(t *testing.T) {
+	t.Parallel()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	data, err := signer.PassJSON(founderBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("PassJSON: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, ok := decoded["expirationDate"]; ok {
+		t.Error("pass.json contains expirationDate for a non-expiring badge, want it omitted")
+	}
+	if !bytes.Contains(data, []byte(`"Never"`)) {
+		t.Error(`pass.json EXPIRES field should read "Never" for a non-expiring badge`)
 	}
 }

@@ -121,13 +121,17 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 	if err := b.Registration.Validate(); err != nil {
 		return "", fmt.Errorf("googlepass: %w", err)
 	}
-	if b.ExpiresAt.IsZero() {
-		return "", errors.New("googlepass: badge has no expiration")
-	}
 	if loc == nil {
 		loc = time.UTC
 	}
-	expires := b.ExpiresAt.In(loc).Format(time.RFC3339)
+	// Founder badges never expire: no validity interval, and the text module says
+	// so rather than showing a formatted zero time.
+	expires := "Never"
+	var validInterval timeInterval
+	if b.Expires() {
+		expires = b.ExpiresAt.In(loc).Format(time.RFC3339)
+		validInterval = timeInterval{End: dateTime{Date: expires}}
+	}
 
 	obj := genericObject{
 		ID:                 fmt.Sprintf("%s.%s", i.cfg.IssuerID, sanitizeID(b.Registration.ID)),
@@ -143,7 +147,7 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 			{ID: "registration", Header: "Registration", Body: b.Registration.ID},
 		},
 		Barcode:           barcode{Type: "QR_CODE", Value: b.Registration.ID, AlternateText: b.Registration.ID},
-		ValidTimeInterval: timeInterval{End: dateTime{Date: expires}},
+		ValidTimeInterval: validInterval,
 	}
 
 	c := claims{
