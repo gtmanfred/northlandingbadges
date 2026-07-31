@@ -15,7 +15,7 @@ GitHub Actions (hourly cron)
         ▼
    Fly.io machine (scales to zero between triggers)
         │
-        ├── DiscGolfScene ── fetch orders page ─→ parse ─→ classify pass type
+        ├── DiscGolfScene ── log in, POST CSV export ─→ parse ─→ classify pass type
         │                                                      │
         │                              SQLite claim (dedupe) ◄──┘
         │                                        │
@@ -26,6 +26,12 @@ GitHub Actions (hourly cron)
         │                                        │
         └──────────────────── Gmail SMTP (app password) ─→ registrant
 ```
+
+Each poll cycle logs in to DiscGolfScene, POSTs the club-admin CSV export for the
+configured event, classifies each row's division into a badge tier (`MEM`,
+`FNDR`, `SPON`), and derives each registration ID from the event slug plus the
+registrant's email (case-insensitive). Rows without an email cannot be badged
+and are reported in the cycle's `ingest_warnings` rather than aborting the run.
 
 Alternative ingestion: `POST /webhooks/discgolfscene` runs the same pipeline for a
 single registration if the club backend can post webhooks (spec §4, Option A).
@@ -82,8 +88,10 @@ Optional:
 | `CLUB_TIMEZONE` | `America/New_York` | Drives every expiration wall clock. |
 | `SMTP_ADDR` | `smtp.gmail.com:587` | |
 | `EMAIL_FROM_NAME` | `North Landing DGC` | |
-| `DGS_ROSTER_URL` | — | Orders/roster page. Unset means webhook-only; poll cycles become no-ops. |
-| `DGS_LOGIN_URL`, `DGS_USERNAME`, `DGS_PASSWORD` | — | Form login before fetching the roster. |
+| `DGS_EVENT_SLUG` | — | Membership event slug, e.g. `North_Landing_Disc_Golf_Membership_2026_Season`. Update yearly. Unset means webhook-only; poll cycles become no-ops. |
+| `DGS_SEASON_YEAR` | — | Season year, e.g. `2026`. Update yearly, alongside the slug. |
+| `DGS_EMAIL`, `DGS_PASSWORD` | — | Club-admin login with staff access on that event. |
+| `DGS_BASE_URL` | `https://www.discgolfscene.com` | Origin for login and the export. Override only for tests. |
 | `DGS_WEBHOOK_SECRET` | poll token | Secret for the webhook endpoint. |
 | `APPLE_PASS_TYPE_ID`, `APPLE_TEAM_ID`, `APPLE_CERT_PEM`, `APPLE_KEY_PEM`, `APPLE_WWDR_PEM`, `APPLE_ORG_NAME` | — | Unset means emails ship without a `.pkpass`. |
 | `GOOGLE_ISSUER_ID`, `GOOGLE_CLASS_ID`, `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY_PEM` | — | Unset means no Save-to-Google-Wallet button. |
@@ -151,8 +159,9 @@ fly secrets set \
   POLL_TRIGGER_TOKEN="$(openssl rand -hex 32)" \
   GMAIL_USER="northlandingdgc@gmail.com" \
   GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx" \
-  DGS_ROSTER_URL="https://www.discgolfscene.com/club/7500/..." \
-  DGS_USERNAME="club-admin" DGS_PASSWORD="…" \
+  DGS_EVENT_SLUG="North_Landing_Disc_Golf_Membership_2026_Season" \
+  DGS_SEASON_YEAR="2026" \
+  DGS_EMAIL="club-admin@example.com" DGS_PASSWORD="…" \
   APPLE_PASS_TYPE_ID="pass.com.northlanding.badge" \
   APPLE_TEAM_ID="ABCDE12345" \
   APPLE_CERT_PEM="$(cat apple-pass-cert.pem)" \
@@ -165,8 +174,8 @@ fly secrets set \
 ```
 
 GitHub Actions needs the repository secret `POLL_TRIGGER_TOKEN` (same value),
-`FLY_API_TOKEN`, and for the daily contract check `DGS_ROSTER_URL`,
-`DGS_LOGIN_URL`, `DGS_USERNAME`, `DGS_PASSWORD`. Optional repository variables:
+`FLY_API_TOKEN`, and for the daily contract check `DGS_EVENT_SLUG`,
+`DGS_SEASON_YEAR`, `DGS_EMAIL`, `DGS_PASSWORD`. Optional repository variables:
 `APP_URL`, `EXPECTED_EMAIL_MODE`.
 
 Deploys happen from `deploy.yml` after `ci.yml` goes green on `main`, then a smoke
@@ -206,7 +215,7 @@ cmd/contract-check      daily live-parser check (opens an issue on failure)
 internal/config         env loading + fail-fast validation
 internal/domain         Registration, PassType, classification
 internal/expiry         expiration arithmetic
-internal/dgs            DiscGolfScene webhook parsing + roster scraping
+internal/dgs            DiscGolfScene webhook parsing + CSV export ingest
 internal/store          SQLite ledger, migrations, dedupe claims
 internal/badge          badge PNG, .pkpass icon/logo artwork
 internal/email          HTML/text rendering + MIME serialization
@@ -235,8 +244,8 @@ internal/integration    full-stack tests: real HTTP, real SQLite, real SMTP
 * **Guard-suppressed registrations stay processed.** Testing must not be able to
   double-mail real registrants later; recovering a specific badge is a deliberate
   manual delete.
-* **The scraper is header-driven.** Columns are located by header name, not
-  position, so a reordered table does not silently shift fields into the wrong
+* **The export is header-driven.** Columns are located by header name, not
+  position, so a reordered export does not silently shift fields into the wrong
   ones. A row that cannot be parsed is reported and skipped rather than aborting
   the cycle.
 * **No periodic Fly health check.** Polling `/healthz` would keep the machine

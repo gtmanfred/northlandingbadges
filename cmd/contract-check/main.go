@@ -1,24 +1,26 @@
-// Command contract-check verifies that the DiscGolfScene parser still extracts
-// the fields it needs from the live club page.
+// Command contract-check verifies that the DiscGolfScene club-admin CSV export
+// still carries the columns and rows the pipeline needs.
 //
 // DiscGolfScene publishes no API contract, so this runs on a daily schedule
-// outside the merge gate: a failure means upstream markup changed, not that this
-// repo regressed. The workflow turns a non-zero exit into a GitHub issue
-// (spec §6, contract drift).
+// outside the merge gate: a failure means upstream changed, not that this repo
+// regressed. The workflow turns a non-zero exit into a GitHub issue (spec §6,
+// contract drift).
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	_ "time/tzdata"
 
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/dgs"
-	"github.com/northlanding/badges/internal/domain"
 )
 
 func main() {
@@ -31,10 +33,6 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	rosterURL := os.Getenv("DGS_ROSTER_URL")
-	if rosterURL == "" {
-		return fmt.Errorf("DGS_ROSTER_URL is required")
-	}
 	tz := os.Getenv("CLUB_TIMEZONE")
 	if tz == "" {
 		tz = config.DefaultTimezone
@@ -44,12 +42,24 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("CLUB_TIMEZONE: %w", err)
 	}
 
-	client, err := dgs.NewClient(config.DGSConfig{
-		RosterURL: rosterURL,
-		LoginURL:  os.Getenv("DGS_LOGIN_URL"),
-		Username:  os.Getenv("DGS_USERNAME"),
-		Password:  os.Getenv("DGS_PASSWORD"),
-	}, loc, log)
+	seasonYear := 0
+	if raw := strings.TrimSpace(os.Getenv("DGS_SEASON_YEAR")); raw != "" {
+		if seasonYear, err = strconv.Atoi(raw); err != nil {
+			return fmt.Errorf("DGS_SEASON_YEAR %q is not a number", raw)
+		}
+	}
+	cfg := config.DGSConfig{
+		BaseURL:    os.Getenv("DGS_BASE_URL"),
+		EventSlug:  os.Getenv("DGS_EVENT_SLUG"),
+		SeasonYear: seasonYear,
+		Email:      os.Getenv("DGS_EMAIL"),
+		Password:   os.Getenv("DGS_PASSWORD"),
+	}
+	if !cfg.Configured() {
+		return errors.New("DGS_EVENT_SLUG, DGS_SEASON_YEAR, DGS_EMAIL and DGS_PASSWORD are required")
+	}
+
+	client, err := dgs.NewExportClient(cfg, loc, log)
 	if err != nil {
 		return err
 	}
@@ -57,31 +67,27 @@ func run(log *slog.Logger) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	registrations, errs := client.Fetch(ctx)
+	candidates, errs := client.Fetch(ctx)
 	for _, err := range errs {
 		log.Warn("row or fetch warning", "error", err)
+		// A missing column is a contract break, not a bad row.
+		if errors.Is(err, dgs.ErrMissingColumn) {
+			return err
+		}
 	}
-	if len(registrations) == 0 {
-		return fmt.Errorf("parser extracted zero registrations from %s (warnings: %v)", rosterURL, errs)
+	if len(candidates) == 0 {
+		return fmt.Errorf("export yielded zero usable registrations for %s (warnings: %v)", cfg.EventSlug, errs)
 	}
-
-	// Every parsed row must carry the fields the pipeline needs, and at least one
-	// must classify: a page full of unclassifiable items means the item labels
-	// changed.
-	var classified int
-	for _, reg := range registrations {
-		if err := reg.Validate(); err != nil {
+	for _, c := range candidates {
+		if err := c.Registration.Validate(); err != nil {
 			return fmt.Errorf("parsed row is unusable: %w", err)
 		}
-		if _, err := domain.ClassifyPassType(reg.RawPassType); err == nil {
-			classified++
+		if c.PassType == "" {
+			return fmt.Errorf("registration %s has no pass type", c.Registration.ID)
 		}
 	}
-	if classified == 0 {
-		return fmt.Errorf("none of the %d parsed rows classify as a Day Pass or Season Membership; item labels likely changed", len(registrations))
-	}
 
-	log.Info("parser output looks healthy",
-		"registrations", len(registrations), "classified", classified, "row_warnings", len(errs))
+	log.Info("export output looks healthy",
+		"event", cfg.EventSlug, "candidates", len(candidates), "row_warnings", len(errs))
 	return nil
 }
