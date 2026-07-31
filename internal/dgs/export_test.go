@@ -89,14 +89,33 @@ func TestParseExportFixture(t *testing.T) {
 		t.Errorf("sam pass type = %q, want %q", got, domain.PassTypeSponsor)
 	}
 
-	var unknownDivision bool
-	for _, err := range errs {
-		if errors.Is(err, domain.ErrUnknownPassType) {
-			unknownDivision = true
+	// Each of the three bad rows must fail for its own reason, not just contribute
+	// to the total count: a regression that miscounted the blank-email row as a
+	// date error, say, would still pass a bare len(errs) == 3 check.
+	unclaimed := make([]error, len(errs))
+	copy(unclaimed, errs)
+	claim := func(match func(error) bool) error {
+		for i, err := range unclaimed {
+			if err != nil && match(err) {
+				unclaimed[i] = nil
+				return err
+			}
 		}
+		return nil
 	}
-	if !unknownDivision {
+
+	if err := claim(func(err error) bool { return errors.Is(err, domain.ErrUnknownPassType) }); err == nil {
 		t.Errorf("expected an ErrUnknownPassType row error for division PRO, got %v", errs)
+	}
+	if err := claim(func(err error) bool {
+		return strings.Contains(err.Error(), "missing email") && strings.Contains(err.Error(), "Morgan Mando")
+	}); err == nil {
+		t.Errorf("expected a missing-email row error naming Morgan Mando, got %v", errs)
+	}
+	if err := claim(func(err error) bool {
+		return strings.Contains(err.Error(), "unrecognized date") && strings.Contains(err.Error(), "not a date")
+	}); err == nil {
+		t.Errorf("expected an unrecognized-date row error for the bad-date row, got %v", errs)
 	}
 }
 
