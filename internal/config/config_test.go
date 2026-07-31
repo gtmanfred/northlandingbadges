@@ -199,7 +199,10 @@ func TestWalletConfiguredPredicates(t *testing.T) {
 		"GOOGLE_CLASS_ID":    "3388000000000000000.northlanding",
 		"GOOGLE_SA_EMAIL":    "wallet@proj.iam.gserviceaccount.com",
 		"GOOGLE_SA_KEY_PEM":  "-----BEGIN PRIVATE KEY-----",
-		"DGS_ROSTER_URL":     "https://www.discgolfscene.com/club/7500/orders",
+		"DGS_EVENT_SLUG":     "North_Landing_Disc_Golf_Membership_2026_Season",
+		"DGS_SEASON_YEAR":    "2026",
+		"DGS_EMAIL":          "admin@example.com",
+		"DGS_PASSWORD":       "secret",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -213,5 +216,80 @@ func TestLoadRejectsNilGetenv(t *testing.T) {
 	t.Parallel()
 	if _, err := config.Load(nil); err == nil {
 		t.Fatal("expected error for nil getenv")
+	}
+}
+
+func TestLoadDGSExportConfig(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(env(map[string]string{
+		"POLL_TRIGGER_TOKEN": "t",
+		"EMAIL_MODE":         "dry_run",
+		"DGS_EVENT_SLUG":     "North_Landing_Disc_Golf_Membership_2026_Season",
+		"DGS_SEASON_YEAR":    "2026",
+		"DGS_EMAIL":          "admin@example.com",
+		"DGS_PASSWORD":       "secret",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.DGS.Configured() {
+		t.Fatal("DGS should be configured")
+	}
+	if cfg.DGS.SeasonYear != 2026 {
+		t.Errorf("SeasonYear = %d, want 2026", cfg.DGS.SeasonYear)
+	}
+	if got, want := cfg.DGS.LoginURL(), "https://www.discgolfscene.com/auth/sign-in"; got != want {
+		t.Errorf("LoginURL = %q, want %q", got, want)
+	}
+	want := "https://www.discgolfscene.com/tournaments/North_Landing_Disc_Golf_Membership_2026_Season/admin/registration-export"
+	if got := cfg.DGS.ExportURL(); got != want {
+		t.Errorf("ExportURL = %q, want %q", got, want)
+	}
+}
+
+func TestLoadDGSBaseURLOverrideAndTrailingSlash(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(env(map[string]string{
+		"POLL_TRIGGER_TOKEN": "t",
+		"EMAIL_MODE":         "dry_run",
+		"DGS_BASE_URL":       "http://127.0.0.1:9999/",
+		"DGS_EVENT_SLUG":     "Slug",
+		"DGS_SEASON_YEAR":    "2026",
+		"DGS_EMAIL":          "admin@example.com",
+		"DGS_PASSWORD":       "secret",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := cfg.DGS.LoginURL(), "http://127.0.0.1:9999/auth/sign-in"; got != want {
+		t.Errorf("LoginURL = %q, want %q", got, want)
+	}
+}
+
+func TestLoadDGSPartialConfigIsNotConfigured(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(env(map[string]string{
+		"POLL_TRIGGER_TOKEN": "t",
+		"EMAIL_MODE":         "dry_run",
+		"DGS_EVENT_SLUG":     "Slug",
+		// no season year, email or password
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DGS.Configured() {
+		t.Error("DGS with only a slug should not be Configured()")
+	}
+}
+
+func TestLoadRejectsNonNumericSeasonYear(t *testing.T) {
+	t.Parallel()
+	_, err := config.Load(env(map[string]string{
+		"POLL_TRIGGER_TOKEN": "t",
+		"EMAIL_MODE":         "dry_run",
+		"DGS_SEASON_YEAR":    "twenty twenty six",
+	}))
+	if err == nil {
+		t.Fatal("Load with a non-numeric DGS_SEASON_YEAR = nil error, want an error")
 	}
 }
