@@ -116,6 +116,17 @@ func TestBadgeExpires(t *testing.T) {
 	}
 }
 
+func TestCandidateCarriesRegistrationAndPassType(t *testing.T) {
+	t.Parallel()
+	c := domain.Candidate{
+		Registration: domain.Registration{ID: "abc123", Name: "A Member", Email: "a@example.com"},
+		PassType:     domain.PassTypeFounder,
+	}
+	if c.Registration.ID != "abc123" || c.PassType != domain.PassTypeFounder {
+		t.Errorf("candidate = %+v", c)
+	}
+}
+
 func TestRegistrationSeasonYearIsCarried(t *testing.T) {
 	t.Parallel()
 	reg := domain.Registration{

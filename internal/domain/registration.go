@@ -100,6 +100,14 @@ func ClassifyPassType(raw string) (PassType, error) {
 	return "", fmt.Errorf("%w: %q", ErrUnknownPassType, raw)
 }
 
+// Candidate is a registration whose pass type the ingest layer already resolved.
+// DiscGolfScene reports a division code, not a pass label, so classification
+// happens where the division is read rather than downstream in the pipeline.
+type Candidate struct {
+	Registration Registration
+	PassType     PassType
+}
+
 // Badge is a fully resolved pass ready to be rendered, signed and mailed.
 type Badge struct {
 	Registration Registration
