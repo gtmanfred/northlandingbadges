@@ -1,28 +1,20 @@
 // Package dgs ingests registrations from DiscGolfScene.
 //
 // DiscGolfScene publishes no API contract, so two ingestion paths exist (spec §4):
-// a webhook payload posted by the club manager backend (Option A), and a scrape
-// of the club orders/roster page (Option B). Both funnel into the same
-// domain.Registration, and the scraper is header-driven rather than
-// position-driven so a reordered column does not silently shift fields.
+// a webhook payload posted by the club manager backend (Option A), and the
+// club-admin CSV export fetched via dgs.ExportClient and parsed by ParseExport
+// (Option B). Both funnel into the same domain.Registration.
 package dgs
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
-	"golang.org/x/net/html"
-
 	"github.com/northlanding/badges/internal/domain"
 )
-
-// ErrNoTable is returned when the fetched page has no recognisable orders table.
-// The daily contract-check workflow treats it as an upstream markup change.
-var ErrNoTable = errors.New("dgs: no orders table found")
 
 // webhookPayload is the JSON shape accepted on the webhook endpoint. Field
 // aliases are accepted because the exact key names DiscGolfScene emits are not
@@ -104,129 +96,6 @@ type RowError struct {
 func (e RowError) Error() string { return fmt.Sprintf("row %d: %v", e.Row, e.Err) }
 func (e RowError) Unwrap() error { return e.Err }
 
-// header aliases: the left side is what we need, the right side is what the page
-// might call it.
-var headerAliases = map[string][]string{
-	"id":    {"order id", "order #", "order", "registration id", "registration", "id", "confirmation"},
-	"name":  {"name", "player", "player name", "member", "guest", "purchaser"},
-	"email": {"email", "e-mail", "email address"},
-	"item":  {"item", "pass", "pass type", "product", "membership", "type", "description"},
-	"date":  {"date", "purchased", "purchase date", "order date", "created", "registered"},
-}
-
-// ParseOrders extracts registrations from the club orders/roster page.
-//
-// Returns the rows it could read plus a RowError per row it could not, so a
-// partially broken page still delivers the badges it can.
-func ParseOrders(r io.Reader, loc *time.Location) ([]domain.Registration, []error) {
-	if loc == nil {
-		loc = time.UTC
-	}
-	doc, err := html.Parse(r)
-	if err != nil {
-		return nil, []error{fmt.Errorf("dgs: parse html: %w", err)}
-	}
-
-	for _, table := range findAll(doc, "table") {
-		rows := findAll(table, "tr")
-		if len(rows) < 2 {
-			continue
-		}
-		index := headerIndex(rows[0])
-		if index == nil {
-			continue
-		}
-
-		var (
-			out  []domain.Registration
-			errs []error
-		)
-		for i, row := range rows[1:] {
-			cells := rowCells(row)
-			if len(cells) == 0 {
-				continue
-			}
-			reg, err := registrationFromRow(cells, index, loc)
-			if err != nil {
-				errs = append(errs, RowError{Row: i + 1, Err: err})
-				continue
-			}
-			out = append(out, reg)
-		}
-		if len(out) == 0 && len(errs) == 0 {
-			continue
-		}
-		return out, errs
-	}
-	return nil, []error{ErrNoTable}
-}
-
-// headerIndex maps our logical field names onto column positions, or nil if the
-// row does not look like an orders header.
-func headerIndex(headerRow *html.Node) map[string]int {
-	cells := rowCells(headerRow)
-	if len(cells) == 0 {
-		return nil
-	}
-	index := map[string]int{}
-	for pos, cell := range cells {
-		norm := normalizeHeader(cell)
-		for field, aliases := range headerAliases {
-			if _, taken := index[field]; taken {
-				continue
-			}
-			for _, alias := range aliases {
-				if norm == alias {
-					index[field] = pos
-					break
-				}
-			}
-		}
-	}
-	// Without an ID, a name/email and an item we cannot build a badge, so this is
-	// not the table we want.
-	for _, required := range []string{"id", "name", "email", "item", "date"} {
-		if _, ok := index[required]; !ok {
-			return nil
-		}
-	}
-	return index
-}
-
-func registrationFromRow(cells []string, index map[string]int, loc *time.Location) (domain.Registration, error) {
-	at := func(field string) string {
-		pos, ok := index[field]
-		if !ok || pos >= len(cells) {
-			return ""
-		}
-		return strings.TrimSpace(cells[pos])
-	}
-
-	reg := domain.Registration{
-		ID:          at("id"),
-		Name:        at("name"),
-		Email:       at("email"),
-		RawPassType: at("item"),
-	}
-	rawDate := at("date")
-	if rawDate == "" {
-		return domain.Registration{}, errors.New("missing purchase date")
-	}
-	purchasedAt, err := ParseDate(rawDate, loc)
-	if err != nil {
-		return domain.Registration{}, err
-	}
-	reg.PurchasedAt = purchasedAt
-	if year, ok := SeasonYearFromLabel(reg.RawPassType); ok {
-		reg.SeasonYear = year
-	}
-
-	if err := reg.Validate(); err != nil {
-		return domain.Registration{}, err
-	}
-	return reg, nil
-}
-
 // dateLayouts are the formats seen on DiscGolfScene pages and webhook payloads,
 // tried in order. RFC3339 first because webhooks are machine-generated.
 var dateLayouts = []string{
@@ -267,54 +136,6 @@ func ParseDate(raw string, loc *time.Location) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("dgs: unrecognized date %q", raw)
-}
-
-func findAll(n *html.Node, tag string) []*html.Node {
-	var out []*html.Node
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.ElementNode && node.Data == tag {
-			out = append(out, node)
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(n)
-	return out
-}
-
-// rowCells returns the trimmed text of each th/td directly inside a row.
-func rowCells(row *html.Node) []string {
-	var out []string
-	for c := row.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type != html.ElementNode || (c.Data != "td" && c.Data != "th") {
-			continue
-		}
-		out = append(out, textOf(c))
-	}
-	return out
-}
-
-func textOf(n *html.Node) string {
-	var b strings.Builder
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.TextNode {
-			b.WriteString(node.Data)
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(n)
-	return strings.Join(strings.Fields(b.String()), " ")
-}
-
-func normalizeHeader(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.TrimSuffix(s, ":")
-	return strings.Join(strings.Fields(s), " ")
 }
 
 func firstNonEmpty(values ...string) string {
