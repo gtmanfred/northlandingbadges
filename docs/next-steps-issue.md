@@ -67,40 +67,80 @@ Note: the JWT `origins` claim is currently left empty. If Google rejects saves f
 the email link, populate it with the app origin — the field already exists in
 `internal/wallet/googlepass`.
 
-## 5. DiscGolfScene ingestion — decide Option A vs B
+## 5. DiscGolfScene ingestion — CSV export (resolved)
 
-This is the largest open unknown in the spec, and the one most likely to need code.
+**Investigated 2026-07-31 against the live site with an authenticated session.** The
+Option A/B question is settled: Option B, using the club-admin CSV export. Findings:
 
-- [ ] Log into the club manager backend and check whether a **webhook URL** can be
-      configured (Option A, preferred).
-  - [ ] If yes: point it at `POST /webhooks/discgolfscene`, set `DGS_WEBHOOK_SECRET`,
-        and confirm the payload's actual field names. The parser accepts several
-        aliases (`order_id` / `registration_id` / `id`, `item` / `pass_type` /
-        `product`, `purchased_at` / `created_at` / `order_date`) — if the real payload
-        uses none of them, add the alias in `internal/dgs/parse.go`.
-  - [ ] Confirm what authentication header, if any, DiscGolfScene can send. The
-        endpoint currently expects a bearer token; a signature-based scheme would need
-        implementing.
-- [ ] If webhooks are unavailable (Option B, the fallback):
-  - [ ] Set `DGS_ROSTER_URL`, and `DGS_LOGIN_URL` / `DGS_USERNAME` / `DGS_PASSWORD`
-        if the page needs a form login. **Verify the login flow**: the current
-        implementation posts `username` / `password` form fields with a cookie jar. A
-        CSRF token or multi-step login would need code.
-  - [ ] Save the real (redacted) orders page over
-        `internal/dgs/testdata/orders.html` so the fixture reflects production markup,
-        then re-run `go test ./internal/dgs/`.
-  - [ ] Confirm the parser finds the table: it locates columns by header name
-        (aliases in `headerAliases`). Add aliases if the real headers differ.
-  - [ ] Check whether the page paginates. Only the first page is fetched today; if
-        orders paginate, pagination needs implementing or the hourly window relied on.
-  - [ ] Confirm the real item labels classify. Anything that isn't recognisably a day
-        pass or season membership is reported as unclassified and **not** mailed —
-        by design, but it needs the real labels checked.
-- [ ] Add `DGS_ROSTER_URL`, `DGS_LOGIN_URL`, `DGS_USERNAME`, `DGS_PASSWORD` as
-      **repository secrets** for `contract-check.yml`.
-      *Acceptance: daily contract-check workflow opens an issue when the parser stops
-      extracting expected fields.*
-- [ ] Run `contract-check.yml` manually once and confirm it passes against live data.
+- The public roster HTML has **no email column**, so the original HTML scrape can
+  never deliver a badge. That path is being deleted.
+- Registrant data lives at `POST /tournaments/<slug>/admin/registration-export` with
+  form field `privacy_agree=1`, returning a CSV attachment. Columns: `Division, Name,
+  First name, Last name, PDGA#, Email, Phone, Entry fee $, Badge Number, Address,
+  City, State, ZIP, Country, Registration date EST, Notes`.
+- Login is a plain form POST: `POST /auth/sign-in` with `auth_email` /
+  `auth_password`. **No CSRF token, no captcha.** The old code posted
+  `username`/`password` — wrong field names.
+- The export carries **no registration ID**. IDs are derived as
+  `sha256(event_slug + "|" + lower(email))[:12]`.
+- Live 2026 season: 202 registrants + a trailing `Totals` row; MEM 191 / FNDR 10 /
+  SPON 1; **13 blank emails**; 61 blank badge numbers; registration dates
+  2025-11-13 → 2026-07-29.
+- Membership divisions are implemented (PR #5): MEM season member, FNDR non-expiring
+  founder issued once, SPON sponsor. Season expiry comes from the event's season
+  year, not the purchase year.
+
+Design: `docs/superpowers/specs/2026-07-31-csv-export-ingest-design.md`.
+
+### Code still to land
+
+- [ ] Implement the CSV export ingest per that design (`dgs.ExportClient`,
+      `ParseExport`, `domain.Candidate`, `Fetcher` returning candidates).
+- [ ] Delete the HTML scrape path (`ParseOrders` and friends,
+      `internal/dgs/testdata/orders.html`).
+- [ ] Repoint `cmd/contract-check` at the export: log in, POST the export, verify the
+      required headers. It currently asserts HTML roster markup, which is why
+      issue #3 fires.
+
+### Deploy steps once that lands
+
+- [ ] Set the new Fly secrets and drop the old ones. **Config names changed:**
+
+      | Old | New |
+      |---|---|
+      | `DGS_ROSTER_URL` | `DGS_EVENT_SLUG` (e.g. `North_Landing_Disc_Golf_Membership_2026_Season`) |
+      | `DGS_LOGIN_URL` | *(gone — derived from `DGS_BASE_URL`)* |
+      | `DGS_USERNAME` | `DGS_EMAIL` |
+      | `DGS_PASSWORD` | `DGS_PASSWORD` (unchanged) |
+      | — | `DGS_SEASON_YEAR` (e.g. `2026`) |
+      | — | `DGS_BASE_URL` (optional; defaults to `https://www.discgolfscene.com`) |
+
+      Nothing is released yet, so no migration is needed — just set the new names.
+- [ ] Use a **club-admin account that has staff access on the membership event**. Staff
+      access is per event: the current admin has it on the season membership but
+      **not** on the Day Pass event, whose export returns "Sign in as a tournament
+      staff member".
+- [ ] Add `DGS_EVENT_SLUG`, `DGS_SEASON_YEAR`, `DGS_EMAIL`, `DGS_PASSWORD` as
+      **repository secrets** for `contract-check.yml`, and remove the old four.
+- [ ] Re-enable the scheduled `poll.yml` and `contract-check.yml` workflows (disabled
+      in 1dd5399) once the export ingest is live.
+- [ ] Run `contract-check.yml` manually once and confirm it passes against the live
+      export. Close issue #3 when it does.
+- [ ] **Yearly, by hand:** update `DGS_EVENT_SLUG` and `DGS_SEASON_YEAR` when the club
+      publishes the next season's event.
+- [ ] Chase the **13 registrants with no email** — they cannot be badged. They appear
+      in the cycle report's `ingest_warnings` and the structured log.
+- [ ] Confirm dry-run output for one FNDR and one SPON registrant before going live:
+      founder badge shows `NO EXPIRATION` and no Apple `expirationDate`; sponsor
+      shows Dec 31 of `DGS_SEASON_YEAR`.
+
+### Webhook path (Option A) — deferred, not deleted
+
+- [ ] Still worth asking whether the club backend can post webhooks to
+      `POST /webhooks/discgolfscene`; the handler and `ParseWebhook` remain. If it can,
+      confirm the real payload field names and set `DGS_WEBHOOK_SECRET`. Webhook
+      payloads must carry a season year in the item label, or season memberships are
+      rejected.
 
 ## 6. Fly.io deployment
 
@@ -183,10 +223,16 @@ need manual row clearing.
 - **No pass updates.** If a registrant's details change or a membership is refunded,
   nothing revokes or updates an issued pass. Apple's web service endpoints and
   Google's Objects API are both out of scope today.
-- **No pagination on the roster scrape** (see §5).
+- **Export is fetched whole, no pagination.** The CSV export returns every
+  registrant in one response, so the old first-page-only concern is gone.
+- **Editing a registrant's email on DiscGolfScene mints a new derived ID**, so they
+  would receive a second badge. Accepted (see §5 design).
 - **`origins` unset on the Google Wallet JWT** (see §4).
-- **Roster fetch reads only the first 8 MB** of the page (`maxPageBytes`) as a memory
-  guard on a 256MB instance. Fine for a table; worth revisiting if the page grows.
+- **Export read is capped at 8 MB** (`maxPageBytes`) as a memory guard on a 256MB
+  instance. The live 202-row export is a few tens of KB; worth revisiting only if the
+  club grows an order of magnitude.
+- **Day pass badges are not ingested.** The admin account has no staff access on that
+  event, so its export is unreachable (see §5).
 - **`staticcheck` cannot run on a Go 1.24 toolchain locally** — the module requires
   1.25 (pulled in by `golang.org/x/net` and `golang.org/x/image`). CI installs 1.25,
   so `ci.yml` is unaffected.
