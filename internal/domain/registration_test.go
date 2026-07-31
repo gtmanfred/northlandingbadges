@@ -88,3 +88,47 @@ func TestRegistrationValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestPassTypeLabelIncludesTiers(t *testing.T) {
+	t.Parallel()
+	cases := map[domain.PassType]string{
+		domain.PassTypeDay:     "Day Pass",
+		domain.PassTypeSeason:  "Season Member",
+		domain.PassTypeFounder: "Founder",
+		domain.PassTypeSponsor: "Course Sponsor",
+	}
+	for passType, want := range cases {
+		if got := passType.Label(); got != want {
+			t.Errorf("Label(%q) = %q, want %q", passType, got, want)
+		}
+	}
+}
+
+func TestBadgeExpires(t *testing.T) {
+	t.Parallel()
+	expiring := domain.Badge{ExpiresAt: time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)}
+	if !expiring.Expires() {
+		t.Error("badge with a non-zero ExpiresAt should report Expires() == true")
+	}
+	permanent := domain.Badge{}
+	if permanent.Expires() {
+		t.Error("badge with a zero ExpiresAt should report Expires() == false")
+	}
+}
+
+func TestRegistrationSeasonYearIsCarried(t *testing.T) {
+	t.Parallel()
+	reg := domain.Registration{
+		ID:          "1",
+		Name:        "A Member",
+		Email:       "a@example.com",
+		SeasonYear:  2026,
+		PurchasedAt: time.Date(2025, 11, 13, 1, 7, 27, 0, time.UTC),
+	}
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+	if reg.SeasonYear != 2026 {
+		t.Errorf("SeasonYear = %d, want 2026", reg.SeasonYear)
+	}
+}
