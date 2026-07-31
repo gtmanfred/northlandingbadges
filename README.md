@@ -32,10 +32,20 @@ single registration if the club backend can post webhooks (spec §4, Option A).
 
 ### Expiration rules
 
-| Purchase | Expiration |
+| Pass | Expiration |
 |---|---|
 | Day Pass on date *X* | *X* + 1 day at 23:59:59, club-local |
-| Season Membership in year *YYYY* | Dec 31 *YYYY* at 23:59:59, club-local |
+| Season Membership (`MEM`) for season *YYYY* | Dec 31 *YYYY* at 23:59:59, club-local |
+| Course Sponsor (`SPON`) for season *YYYY* | Dec 31 *YYYY* at 23:59:59, club-local |
+| Course Founder (`FNDR`) | Never — issued once per registrant |
+
+Season expiry comes from the season year of the DiscGolfScene event, **not** the
+purchase date: registration for a season opens in November of the prior year, so
+a purchase year would expire those badges before the season began. A season label
+carrying no year is rejected rather than guessed at.
+
+Founder badges never expire, so a founder who re-registers in a later season is
+recorded as `skipped_founder_existing` and mailed nothing.
 
 Calendar arithmetic runs in `CLUB_TIMEZONE` (default `America/New_York`), so a
 Dec 31 day pass rolls into the next year, leap days are handled, and DST

@@ -23,6 +23,7 @@ import (
 
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/dgs"
+	"github.com/northlanding/badges/internal/domain"
 	"github.com/northlanding/badges/internal/mailer"
 	"github.com/northlanding/badges/internal/poll"
 	"github.com/northlanding/badges/internal/server"
@@ -39,6 +40,7 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 
 type stack struct {
 	client   *http.Client
+	pollSvc  *poll.Service
 	baseURL  string
 	smtp     *smtptest.Server
 	store    *store.Store
@@ -154,7 +156,7 @@ func newStack(t *testing.T, mode config.EmailMode, allowlist []string, redirectT
 	cfg.BaseURL = appServer.URL
 
 	return &stack{
-		client: appServer.Client(), baseURL: appServer.URL, smtp: smtpServer,
+		client: appServer.Client(), pollSvc: svc, baseURL: appServer.URL, smtp: smtpServer,
 		store: db, dgsHits: &hits, dbPath: dbPath, location: ny,
 	}
 }
@@ -504,4 +506,66 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestPipelinePerTier drives one real registration per membership division
+// through the full stack: division classification, expiry, artwork, signed
+// wallet passes, and the SMTP delivery decision.
+func TestPipelinePerTier(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		division    string
+		wantLabel   string
+		wantExpires bool
+	}{
+		{"member", "MEM", "Season Member", true},
+		{"sponsor", "SPON", "Course Sponsor", true},
+		{"founder", "FNDR", "Founder", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			passType, err := dgs.ClassifyDivision(tc.division)
+			if err != nil {
+				t.Fatalf("ClassifyDivision(%q): %v", tc.division, err)
+			}
+			if passType.Label() != tc.wantLabel {
+				t.Fatalf("label = %q, want %q", passType.Label(), tc.wantLabel)
+			}
+
+			s := newStack(t, config.ModeLive, nil, "")
+			reg := domain.Registration{
+				ID:          "reg-" + tc.name,
+				Name:        "Test " + tc.name,
+				Email:       tc.name + "@example.com",
+				RawPassType: tc.division,
+				SeasonYear:  2026,
+				// A 2026-season purchase made in November 2025.
+				PurchasedAt: time.Date(2025, 11, 13, 1, 7, 27, 0, s.location),
+			}
+			outcome, err := s.pollSvc.ProcessClassified(context.Background(), reg, passType)
+			if err != nil {
+				t.Fatalf("ProcessClassified: %v", err)
+			}
+			if got := !outcome.ExpiresAt.IsZero(); got != tc.wantExpires {
+				t.Fatalf("expires = %v, want %v", got, tc.wantExpires)
+			}
+			if tc.wantExpires && outcome.ExpiresAt.Year() != 2026 {
+				t.Errorf("expiry year = %d, want 2026 (season year, not purchase year)", outcome.ExpiresAt.Year())
+			}
+			if outcome.Action != mailer.ActionSent {
+				t.Fatalf("action = %q, want %q", outcome.Action, mailer.ActionSent)
+			}
+			if len(s.smtp.Messages()) != 1 {
+				t.Fatalf("sent %d emails, want 1", len(s.smtp.Messages()))
+			}
+			body := decodeQP(string(s.smtp.Messages()[0].Data))
+			if !strings.Contains(body, tc.wantLabel) {
+				t.Errorf("email does not name the %s tier", tc.wantLabel)
+			}
+			if !tc.wantExpires && !strings.Contains(body, "Never") {
+				t.Error("founder email should say the badge never expires")
+			}
+		})
+	}
 }

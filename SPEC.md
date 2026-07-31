@@ -47,8 +47,15 @@ To minimize costs on Fly.io, the application will run as a single, low-memory co
   * **GIVEN** a user purchases a Day Pass on `Date X`
   * **THEN** generate a digital badge where `Expiration Date = Date X + 1 Day (at 11:59 PM)`.
 * **Scenario B: Season Membership Purchased**
-  * **GIVEN** a user purchases a $50 Season Membership in year `YYYY`
-  * **THEN** generate a digital badge where `Expiration Date = December 31, YYYY`.
+  * **GIVEN** a user purchases a $50 Season Membership (division `MEM`) for season `YYYY`
+  * **THEN** generate a digital badge where `Expiration Date = December 31, YYYY`, where `YYYY` is the season year of the event and not the year of purchase — season registration opens in November of the prior year.
+* **Scenario C: Founder or Sponsor division**
+  * **GIVEN** a season registration in division `FNDR`
+  * **THEN** the badge never expires, and it is issued only on the registrant's first founder registration; later seasons record `skipped_founder_existing` and mail nothing.
+  * **GIVEN** a season registration in division `SPON`
+  * **THEN** the badge expires December 31 of the event's season year, with sponsor artwork and labelling.
+  * **GIVEN** a season registration in an unrecognised division
+  * **THEN** the row is rejected with `ErrUnknownPassType` and reported, never issued as a member badge.
 
 ### Email Delivery
 * All emails must be dispatched from the designated Gmail address using secure app credentials stored in the Fly.io environment secrets (`GMAIL_USER`, `GMAIL_APP_PASSWORD`).
