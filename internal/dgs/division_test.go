@@ -56,3 +56,25 @@ func TestIsTotalsRow(t *testing.T) {
 		}
 	}
 }
+
+func TestSeasonYearFromLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		label string
+		want  int
+		ok    bool
+	}{
+		{"2026 Season Membership", 2026, true},
+		{"North Landing Disc Golf Membership 2026 Season", 2026, true},
+		{"North_Landing_Disc_Golf_Membership_2026_Season", 2026, true},
+		{"Season Membership - $50", 0, false},
+		{"Day Pass", 0, false},
+		{"", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := dgs.SeasonYearFromLabel(tc.label)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("SeasonYearFromLabel(%q) = (%d, %v), want (%d, %v)", tc.label, got, ok, tc.want, tc.ok)
+		}
+	}
+}

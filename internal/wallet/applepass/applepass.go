@@ -65,9 +65,6 @@ func (s *Signer) Build(b domain.Badge, loc *time.Location) ([]byte, error) {
 	if err := b.Registration.Validate(); err != nil {
 		return nil, fmt.Errorf("applepass: %w", err)
 	}
-	if b.ExpiresAt.IsZero() {
-		return nil, errors.New("applepass: badge has no expiration")
-	}
 	if loc == nil {
 		loc = time.UTC
 	}

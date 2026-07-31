@@ -281,10 +281,22 @@ func TestBuildRejectsIncompleteBadge(t *testing.T) {
 	if _, err := signer.Build(domain.Badge{}, time.UTC); err == nil {
 		t.Error("expected error for empty badge")
 	}
-	noExpiry := testBadge()
-	noExpiry.ExpiresAt = time.Time{}
-	if _, err := signer.Build(noExpiry, time.UTC); err == nil {
-		t.Error("expected error for badge without expiration")
+	// A missing expiration is no longer an error: founder badges never expire.
+	// See TestBuildAcceptsNonExpiringBadge.
+}
+
+func TestBuildAcceptsNonExpiringBadge(t *testing.T) {
+	t.Parallel()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	pkpass, err := signer.Build(founderBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("Build for a non-expiring badge = %v, want nil", err)
+	}
+	if len(readZip(t, pkpass)["pass.json"]) == 0 {
+		t.Error(".pkpass has no pass.json")
 	}
 }
 
