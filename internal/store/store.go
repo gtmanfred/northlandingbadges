@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver: no cgo, so the image can be minimal
@@ -101,6 +102,15 @@ var migrations = []struct {
 				created_at      TEXT NOT NULL
 			)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_token ON pass_artifacts(access_token)`,
+		},
+	},
+	{
+		version: 3,
+		stmts: []string{
+			// Founder badges are issued once per person, and the only stable
+			// identifier across seasons is the email address.
+			`CREATE INDEX IF NOT EXISTS idx_processed_email_pass_type
+			   ON processed_registrations(email, pass_type)`,
 		},
 	},
 }
@@ -247,6 +257,34 @@ func (s *Store) Processed(ctx context.Context, registrationID string) (bool, err
 	}
 	if err != nil {
 		return false, fmt.Errorf("store: processed %s: %w", registrationID, err)
+	}
+	return true, nil
+}
+
+// FounderIssued reports whether a founder badge has already been delivered to
+// this email address. Founders re-register every season, but their badge never
+// expires, so only the first registration produces one.
+//
+// Matching is case-insensitive because DiscGolfScene does not normalise the
+// address. Rows still holding a pending claim do not count: nothing was issued
+// for them yet. A blank email can never be matched and is reported as not
+// issued, which pushes the row into the admin exception path instead of silently
+// suppressing a badge.
+func (s *Store) FounderIssued(ctx context.Context, email string) (bool, error) {
+	trimmed := strings.TrimSpace(email)
+	if trimmed == "" {
+		return false, nil
+	}
+	var one int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM processed_registrations
+		  WHERE lower(email) = lower(?) AND pass_type = 'founder' AND action <> 'pending'
+		  LIMIT 1`, trimmed).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: founder issued %s: %w", trimmed, err)
 	}
 	return true, nil
 }

@@ -268,3 +268,83 @@ func TestPing(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 }
+
+func TestFounderIssued(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openTemp(t)
+
+	if _, err := s.Claim(ctx, "reg-1"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := s.MarkProcessed(ctx, store.Record{
+		RegistrationID: "reg-1",
+		Email:          "Founder@Example.com",
+		PassType:       "founder",
+		Action:         "sent",
+		ProcessedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+
+	issued, err := s.FounderIssued(ctx, "founder@example.com")
+	if err != nil {
+		t.Fatalf("FounderIssued: %v", err)
+	}
+	if !issued {
+		t.Error("FounderIssued for a processed founder = false, want true (match must be case-insensitive)")
+	}
+
+	issued, err = s.FounderIssued(ctx, "someone.else@example.com")
+	if err != nil {
+		t.Fatalf("FounderIssued: %v", err)
+	}
+	if issued {
+		t.Error("FounderIssued for an unknown email = true, want false")
+	}
+}
+
+func TestFounderIssuedIgnoresSeasonMembersAndPendingClaims(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openTemp(t)
+
+	// A season member with the same email is not a founder.
+	if _, err := s.Claim(ctx, "reg-season"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := s.MarkProcessed(ctx, store.Record{
+		RegistrationID: "reg-season",
+		Email:          "dual@example.com",
+		PassType:       "season_membership",
+		Action:         "sent",
+		ProcessedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+
+	// A claimed-but-unprocessed founder row must not count as issued.
+	if _, err := s.Claim(ctx, "reg-pending"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	issued, err := s.FounderIssued(ctx, "dual@example.com")
+	if err != nil {
+		t.Fatalf("FounderIssued: %v", err)
+	}
+	if issued {
+		t.Error("FounderIssued = true for a season member and a pending claim, want false")
+	}
+}
+
+func TestFounderIssuedBlankEmail(t *testing.T) {
+	t.Parallel()
+	s, _ := openTemp(t)
+	issued, err := s.FounderIssued(context.Background(), "   ")
+	if err != nil {
+		t.Fatalf("FounderIssued: %v", err)
+	}
+	if issued {
+		t.Error("FounderIssued(blank) = true, want false: a blank email can never be deduped")
+	}
+}
