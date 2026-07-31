@@ -1,0 +1,9 @@
+Division,Name,First name,Last name,PDGA#,Email,Phone,Entry fee $,Badge Number,Address,City,State,ZIP,Country,Registration date EST,Notes
+MEM,Casey Chains,Casey,Chains,88231,casey@example.com,555-0100,60,101,1 Fairway Ln,Marietta,GA,30064,US,2025-11-13 01:07:27,
+MEM,Robin Rollaway,Robin,Rollaway,,Robin@Example.com,,60,,2 Basket Rd,Marietta,GA,30064,US,2026-04-01 08:02:11,paid at shop
+FNDR,Dana Discraft,Dana,Discraft,12345,dana@example.com,,0,7,3 Tee Pad Ct,Marietta,GA,30064,US,2025-11-13 01:07:26,
+SPON,Sam Sponsor,Sam,Sponsor,,sam@example.com,,0,,4 Ace Ave,Marietta,GA,30064,US,2026-02-20 19:45:00,
+MEM,Morgan Mando,Morgan,Mando,,,,60,,5 Mando Way,Marietta,GA,30064,US,2026-05-02 07:00:00,
+PRO,Pat Putter,Pat,Putter,,pat@example.com,,60,,6 Putt St,Marietta,GA,30064,US,2026-06-01 12:00:00,
+MEM,Bad Date,Bad,Date,,baddate@example.com,,60,,7 Broken Rd,Marietta,GA,30064,US,not a date,
+Totals,,,,,,,180,,,,,,,,
