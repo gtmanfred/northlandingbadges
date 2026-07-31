@@ -7,9 +7,14 @@ name: poll
 # Known limits, accepted at hourly granularity: GitHub's scheduled runs are
 # best-effort and can be delayed by several minutes, and schedules are disabled
 # automatically after 60 days of repository inactivity.
+#
+# DISABLED until the app is actually deployed: the hourly schedule is commented
+# out so it does not fail every hour against a non-existent host. Re-enable by
+# uncommenting the schedule block below. Manual runs still work via
+# workflow_dispatch.
 on:
-  schedule:
-    - cron: "0 * * * *" # hourly, UTC
+  # schedule:
+  #   - cron: "0 * * * *" # hourly, UTC
   workflow_dispatch:
 
 permissions:
