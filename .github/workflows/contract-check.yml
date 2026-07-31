@@ -6,9 +6,14 @@ name: contract-check
 # credentials and asserts the parser still extracts what it needs. A failure means
 # upstream markup changed, not that a PR regressed — so it opens an issue rather
 # than blocking merges. It is deliberately NOT a required check.
+#
+# DISABLED until the app is actually deployed: the daily schedule is commented
+# out so it does not file drift issues before the credentials exist. Re-enable by
+# uncommenting the schedule block below. Manual runs still work via
+# workflow_dispatch.
 on:
-  schedule:
-    - cron: "20 6 * * *" # daily
+  # schedule:
+  #   - cron: "20 6 * * *" # daily
   workflow_dispatch:
 
 permissions:
