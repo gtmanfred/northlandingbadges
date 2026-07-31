@@ -255,9 +255,25 @@ func TestSaveJWTRejectsIncompleteBadge(t *testing.T) {
 	if _, err := issuer.SaveJWT(domain.Badge{}, time.UTC); err == nil {
 		t.Error("expected error for empty badge")
 	}
-	noExpiry := testBadge()
-	noExpiry.ExpiresAt = time.Time{}
-	if _, err := issuer.SaveJWT(noExpiry, time.UTC); err == nil {
-		t.Error("expected error for badge without expiration")
+	// A missing expiration is no longer an error: founder badges never expire.
+	// See TestSaveJWTAllowsNonExpiringBadge.
+}
+
+func TestSaveJWTAllowsNonExpiringBadge(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT for a non-expiring badge = %v, want nil", err)
+	}
+	if jwt == "" {
+		t.Fatal("SaveJWT returned an empty token")
 	}
 }

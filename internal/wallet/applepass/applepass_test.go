@@ -310,3 +310,32 @@ func TestSignerWorksWithoutWWDRChain(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 }
+
+func founderBadge() domain.Badge {
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+	return b
+}
+
+func TestPassJSONOmitsExpirationForFounder(t *testing.T) {
+	t.Parallel()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	data, err := signer.PassJSON(founderBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("PassJSON: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, ok := decoded["expirationDate"]; ok {
+		t.Error("pass.json contains expirationDate for a non-expiring badge, want it omitted")
+	}
+	if !bytes.Contains(data, []byte(`"Never"`)) {
+		t.Error(`pass.json EXPIRES field should read "Never" for a non-expiring badge`)
+	}
+}

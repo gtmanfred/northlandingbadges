@@ -2,6 +2,7 @@ package badge_test
 
 import (
 	"bytes"
+	"image/color"
 	"image/png"
 	"testing"
 	"time"
@@ -128,5 +129,45 @@ func TestIconAndLogo(t *testing.T) {
 	}
 	if _, err := badge.Logo(10, 10); err == nil {
 		t.Error("expected error for tiny logo")
+	}
+}
+
+func TestAccentColorPerTier(t *testing.T) {
+	t.Parallel()
+	cases := map[domain.PassType]color.RGBA{
+		domain.PassTypeSeason:  {R: 0xE8, G: 0xB4, B: 0x3A, A: 0xFF},
+		domain.PassTypeDay:     {R: 0xE8, G: 0xB4, B: 0x3A, A: 0xFF},
+		domain.PassTypeFounder: {R: 0xC9, G: 0xD3, B: 0xDB, A: 0xFF},
+		domain.PassTypeSponsor: {R: 0xB8, G: 0x73, B: 0x33, A: 0xFF},
+	}
+	for passType, want := range cases {
+		if got := badge.AccentColor(passType); got != want {
+			t.Errorf("AccentColor(%q) = %v, want %v", passType, got, want)
+		}
+	}
+}
+
+func TestRenderFounderBadgeUsesTierAccent(t *testing.T) {
+	t.Parallel()
+	b := domain.Badge{
+		Registration: domain.Registration{
+			ID: "reg-1", Name: "A Founder", Email: "f@example.com",
+			PurchasedAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+		},
+		PassType: domain.PassTypeFounder,
+	}
+	data, err := badge.Render(b, time.UTC)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	// The accent bar is the left-hand 18px column.
+	got := color.RGBAModel.Convert(img.At(4, 300)).(color.RGBA)
+	want := badge.AccentColor(domain.PassTypeFounder)
+	if got != want {
+		t.Errorf("accent bar = %v, want %v", got, want)
 	}
 }
