@@ -632,11 +632,24 @@ func TestRunCycleUsesCandidatePassTypes(t *testing.T) {
 
 func TestRunCycleCountsUnknownDivisionAsUnclassified(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, config.ModeLive, nil, "", nil,
+	ny := clubTZ(t)
+	// A good candidate rides along with the bad row: RunCycle's hard-failure path
+	// (no candidates, only ingest errors) only triggers when the fetch produced
+	// nothing usable at all. With one good candidate present, RunCycle returns a
+	// nil error and actually walks the accounting logic this test exists to
+	// cover, rather than short-circuiting before it ever gets there.
+	h := newHarness(t, config.ModeLive, nil, "",
+		[]domain.Candidate{dayCandidate("DGS-1", "casey@example.com", time.Date(2026, 7, 4, 10, 0, 0, 0, ny))},
 		[]error{fmt.Errorf("row 6: %w: division %q", domain.ErrUnknownPassType, "PRO")})
 
 	report, err := h.svc.RunCycle(context.Background())
-	if err == nil && report.Unclassified != 1 {
-		t.Fatalf("report = %+v, want Unclassified 1", report)
+	if err != nil {
+		t.Fatalf("RunCycle: %v", err)
+	}
+	if report.Unclassified != 1 {
+		t.Errorf("report.Unclassified = %d, want 1", report.Unclassified)
+	}
+	if report.Processed != 1 {
+		t.Errorf("report.Processed = %d, want 1 (the good candidate must still go through)", report.Processed)
 	}
 }
