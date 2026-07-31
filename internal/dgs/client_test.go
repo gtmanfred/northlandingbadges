@@ -140,6 +140,9 @@ func TestExportClientBadCredentials(t *testing.T) {
 	if strings.Contains(errs[0].Error(), "secret") {
 		t.Errorf("error leaks the password: %v", errs[0])
 	}
+	if strings.Contains(errs[0].Error(), "admin@example.com") {
+		t.Errorf("error leaks the login email address: %v", errs[0])
+	}
 }
 
 func TestExportClientHTMLInsteadOfCSVFailsAfterOneRetry(t *testing.T) {

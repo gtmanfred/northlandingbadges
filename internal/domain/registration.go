@@ -47,8 +47,10 @@ func (p PassType) Label() string {
 
 // Registration is one purchase pulled from DiscGolfScene.
 type Registration struct {
-	// ID is the DiscGolfScene order/registration ID. It is the dedupe key and
-	// the wallet pass serial number.
+	// ID is derived as hex(sha256(eventSlug + "|" + lower(trim(email))))[:12] by
+	// the ingest layer, because the DiscGolfScene export carries no
+	// registration ID of its own. It is the dedupe key and the wallet pass
+	// serial number.
 	ID string
 	// Name is the guest name shown on the badge.
 	Name string

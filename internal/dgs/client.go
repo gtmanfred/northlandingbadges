@@ -168,7 +168,7 @@ func (c *ExportClient) login(ctx context.Context) error {
 
 	// The error deliberately names only the account, never the password.
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("dgs: login as %s returned %s", c.cfg.Email, resp.Status)
+		return fmt.Errorf("dgs: DiscGolfScene sign-in returned %s", resp.Status)
 	}
 	return nil
 }
