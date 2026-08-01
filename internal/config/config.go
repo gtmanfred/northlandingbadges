@@ -56,16 +56,43 @@ type Config struct {
 	Google GoogleConfig
 }
 
-// DGSConfig addresses the DiscGolfScene fallback poller (spec §4 Option B).
+// DefaultDGSBaseURL is DiscGolfScene's origin. Overridable so tests can point the
+// client at an httptest server.
+const DefaultDGSBaseURL = "https://www.discgolfscene.com"
+
+// DGSConfig addresses the club-admin CSV registration export.
+//
+// EventSlug and SeasonYear are updated by hand once a year, when the club
+// publishes the next season's membership event. SeasonYear is explicit rather than
+// parsed from the slug: season expiry depends on it, and guessing is worse than
+// requiring one env var.
 type DGSConfig struct {
-	RosterURL string
-	LoginURL  string
-	Username  string
-	Password  string
+	BaseURL    string
+	EventSlug  string
+	SeasonYear int
+	Email      string
+	Password   string
 }
 
-// Configured reports whether live polling is possible.
-func (d DGSConfig) Configured() bool { return d.RosterURL != "" }
+// Configured reports whether the export can be fetched.
+func (d DGSConfig) Configured() bool {
+	return d.EventSlug != "" && d.SeasonYear != 0 && d.Email != "" && d.Password != ""
+}
+
+// LoginURL is the sign-in form endpoint.
+func (d DGSConfig) LoginURL() string { return d.base() + "/auth/sign-in" }
+
+// ExportURL is the club-admin CSV export for the configured event.
+func (d DGSConfig) ExportURL() string {
+	return d.base() + "/tournaments/" + d.EventSlug + "/admin/registration-export"
+}
+
+func (d DGSConfig) base() string {
+	if d.BaseURL == "" {
+		return DefaultDGSBaseURL
+	}
+	return strings.TrimSuffix(d.BaseURL, "/")
+}
 
 // AppleConfig holds the Apple Wallet signing material.
 type AppleConfig struct {
@@ -133,10 +160,11 @@ func Load(getenv Getenv) (*Config, error) {
 		SMTPAddr:         get("SMTP_ADDR", DefaultSMTPAddr),
 		FromName:         get("EMAIL_FROM_NAME", "North Landing DGC"),
 		DGS: DGSConfig{
-			RosterURL: get("DGS_ROSTER_URL", ""),
-			LoginURL:  get("DGS_LOGIN_URL", ""),
-			Username:  get("DGS_USERNAME", ""),
-			Password:  getenv("DGS_PASSWORD"),
+			BaseURL:    get("DGS_BASE_URL", DefaultDGSBaseURL),
+			EventSlug:  get("DGS_EVENT_SLUG", ""),
+			SeasonYear: 0, // set below so a bad value fails fast
+			Email:      get("DGS_EMAIL", ""),
+			Password:   getenv("DGS_PASSWORD"),
 		},
 		Apple: AppleConfig{
 			PassTypeIdentifier: get("APPLE_PASS_TYPE_ID", ""),
@@ -159,6 +187,14 @@ func Load(getenv Getenv) (*Config, error) {
 		if _, err := strconv.Atoi(strings.TrimSpace(port)); err != nil {
 			return nil, fmt.Errorf("config: PORT %q is not a number", port)
 		}
+	}
+
+	if raw := strings.TrimSpace(getenv("DGS_SEASON_YEAR")); raw != "" {
+		year, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("config: DGS_SEASON_YEAR %q is not a number", raw)
+		}
+		cfg.DGS.SeasonYear = year
 	}
 
 	loc, err := time.LoadLocation(get("CLUB_TIMEZONE", DefaultTimezone))

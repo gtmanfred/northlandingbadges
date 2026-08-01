@@ -47,8 +47,10 @@ func (p PassType) Label() string {
 
 // Registration is one purchase pulled from DiscGolfScene.
 type Registration struct {
-	// ID is the DiscGolfScene order/registration ID. It is the dedupe key and
-	// the wallet pass serial number.
+	// ID is derived as hex(sha256(eventSlug + "|" + lower(trim(email))))[:12] by
+	// the ingest layer, because the DiscGolfScene export carries no
+	// registration ID of its own. It is the dedupe key and the wallet pass
+	// serial number.
 	ID string
 	// Name is the guest name shown on the badge.
 	Name string
@@ -98,6 +100,14 @@ func ClassifyPassType(raw string) (PassType, error) {
 		return PassTypeSeason, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrUnknownPassType, raw)
+}
+
+// Candidate is a registration whose pass type the ingest layer already resolved.
+// DiscGolfScene reports a division code, not a pass label, so classification
+// happens where the division is read rather than downstream in the pipeline.
+type Candidate struct {
+	Registration Registration
+	PassType     PassType
 }
 
 // Badge is a fully resolved pass ready to be rendered, signed and mailed.

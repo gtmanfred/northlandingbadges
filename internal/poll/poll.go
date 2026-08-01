@@ -21,9 +21,10 @@ import (
 	"github.com/northlanding/badges/internal/store"
 )
 
-// Fetcher pulls candidate registrations from DiscGolfScene.
+// Fetcher pulls candidate registrations from DiscGolfScene, already classified:
+// the export reports a division code, so classification belongs to ingest.
 type Fetcher interface {
-	Fetch(ctx context.Context) ([]domain.Registration, []error)
+	Fetch(ctx context.Context) ([]domain.Candidate, []error)
 }
 
 // Deliverer renders and conditionally sends the badge email.
@@ -91,24 +92,31 @@ func (s *Service) RunCycle(ctx context.Context) (Report, error) {
 	}
 	log := s.logger()
 
-	registrations, ingestErrs := s.Fetcher.Fetch(ctx)
-	report := Report{Fetched: len(registrations)}
+	candidates, ingestErrs := s.Fetcher.Fetch(ctx)
+	report := Report{Fetched: len(candidates)}
 	for _, err := range ingestErrs {
 		report.IngestWarning = append(report.IngestWarning, err.Error())
+		// Classification now happens in ingest, so an unrecognized division never
+		// becomes a candidate at all — it only shows up here, as a row error. It
+		// must still count toward Unclassified so the report shape does not regress.
+		if errors.Is(err, domain.ErrUnknownPassType) {
+			report.Unclassified++
+		}
 		log.Warn("registration ingest warning", "error", err)
 	}
 	// A fetch that yielded nothing but produced errors is a real failure, not an
 	// empty roster.
-	if len(registrations) == 0 && len(ingestErrs) > 0 {
+	if len(candidates) == 0 && len(ingestErrs) > 0 {
 		return report, fmt.Errorf("poll: ingest failed: %w", errors.Join(ingestErrs...))
 	}
 
-	for _, reg := range registrations {
+	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			report.Errors = append(report.Errors, err.Error())
 			return report, err
 		}
-		outcome, err := s.Process(ctx, reg)
+		reg := candidate.Registration
+		outcome, err := s.ProcessClassified(ctx, reg, candidate.PassType)
 		switch {
 		case errors.Is(err, domain.ErrUnknownPassType):
 			report.Unclassified++
