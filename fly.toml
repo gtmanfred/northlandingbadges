@@ -1,42 +1,36 @@
-# Fly.io configuration for the North Landing badge service.
+# fly.toml app configuration file generated for northlandingbadges on 2026-08-03T13:50:17Z
 #
-# Sized for the free/low-cost tier: one shared-cpu-1x machine with 256MB, allowed
-# to stop when idle. Nothing runs on a timer inside the container — GitHub Actions
-# wakes the app hourly with a request to /tasks/poll (spec §3).
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "north-landing-badges"
-primary_region = "iad" # closest region to Virginia Beach
+app = 'northlandingbadges'
+primary_region = 'ord'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "8080"
-  DB_PATH = "/data/badges.db"
-  CLUB_TIMEZONE = "America/New_York"
-  BASE_URL = "https://north-landing-badges.fly.dev"
-  SMTP_ADDR = "smtp.gmail.com:587"
-  EMAIL_FROM_NAME = "North Landing DGC"
-  # EMAIL_MODE is deliberately not set here: unset means live (spec §4). Set it
-  # with `fly secrets set EMAIL_MODE=allowlist` only during acceptance testing.
+  BASE_URL = 'https://north-landing-badges.fly.dev'
+  CLUB_TIMEZONE = 'America/New_York'
+  DB_PATH = '/data/badges.db'
+  EMAIL_FROM_NAME = 'North Landing DGC'
+  PORT = '8080'
+  SMTP_ADDR = 'smtp.gmail.com:587'
 
-# The dedupe ledger lives on a volume so scaling to zero does not lose it.
-[mounts]
-  source = "badges_data"
-  destination = "/data"
+[[mounts]]
+  source = 'badges_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  # Scale to zero between hourly triggers. The inbound request starts the machine.
   min_machines_running = 0
-  # No periodic health check is configured on purpose: polling /healthz would keep
-  # the machine awake and defeat scale-to-zero. The deploy workflow hits /healthz
-  # once as a smoke test instead.
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+  size = 'shared-cpu-1x'
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
