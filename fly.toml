@@ -4,7 +4,7 @@
 # to stop when idle. Nothing runs on a timer inside the container — GitHub Actions
 # wakes the app hourly with a request to /tasks/poll (spec §3).
 
-app = "north-landing-badges"
+app = "northlandingbadges"
 primary_region = "iad" # closest region to Virginia Beach
 
 [build]
@@ -14,7 +14,7 @@ primary_region = "iad" # closest region to Virginia Beach
   PORT = "8080"
   DB_PATH = "/data/badges.db"
   CLUB_TIMEZONE = "America/New_York"
-  BASE_URL = "https://north-landing-badges.fly.dev"
+  BASE_URL = "https://northlandingbadges.fly.dev"
   SMTP_ADDR = "smtp.gmail.com:587"
   EMAIL_FROM_NAME = "North Landing DGC"
   # EMAIL_MODE is deliberately not set here: unset means live (spec §4). Set it
