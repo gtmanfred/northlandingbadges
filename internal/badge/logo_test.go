@@ -1,7 +1,9 @@
 package badge
 
 import (
+	"bytes"
 	"image/color"
+	"image/png"
 	"testing"
 )
 
@@ -80,5 +82,34 @@ func TestLogoPanelRejectsTinySize(t *testing.T) {
 	t.Parallel()
 	if _, err := logoPanel(4); err == nil {
 		t.Error("expected an error for a tiny panel")
+	}
+}
+
+func TestIconDrawsLogoPanel(t *testing.T) {
+	t.Parallel()
+	data, err := Icon(58)
+	if err != nil {
+		t.Fatalf("Icon: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !isWhitish(img.At(29, 4)) {
+		t.Errorf("top-centre pixel = %v, want the whitish card", img.At(29, 4))
+	}
+
+	found := false
+	for y := 14; y < 44 && !found; y++ {
+		for x := 14; x < 44; x++ {
+			if isGreenish(img.At(x, y)) {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("no green-dominant pixel; the icon is not drawing the club mark")
 	}
 }

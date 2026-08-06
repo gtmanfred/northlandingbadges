@@ -105,15 +105,12 @@ func Icon(size int) ([]byte, error) {
 	}
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	fill(img, img.Bounds(), colorBackground)
-	inset := size / 8
-	fill(img, image.Rect(inset, inset, size-inset, size-inset), colorAccent)
 
-	// "NL" centred; basicfont glyphs are 7x13, so pick the largest scale that fits.
-	scale := max(1, (size-2*inset)/9)
-	textW := 2 * basicfont.Face7x13.Advance * scale
-	x := (size - textW) / 2
-	y := (size - 13*scale) / 2
-	drawScaled(img, x, y, scale, colorBackground, "NL")
+	panel, err := logoPanel(size)
+	if err != nil {
+		return nil, err
+	}
+	draw.Draw(img, img.Bounds(), panel, image.Point{}, draw.Over)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
