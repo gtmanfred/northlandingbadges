@@ -182,3 +182,17 @@ func TestLogoWordmarkScalesUpForRetinaStrip(t *testing.T) {
 		t.Errorf("2x scale = %d, want strictly greater than 1x scale = %d", scale2x, scale1x)
 	}
 }
+
+func TestFitWordmarkPicksLargestScaleSatisfyingBothConstraints(t *testing.T) {
+	t.Parallel()
+	// A wide-but-short strip: width leaves ample room, so the height
+	// constraint (13*s <= height) is the binding one. A starting bound
+	// derived from an arbitrary fraction of height (e.g. height/16) can
+	// understate the true height-derived cap (height/13) and thereby skip a
+	// larger scale that legitimately satisfies both constraints.
+	const width, height = 2000, 100
+	_, scale := fitWordmark(width, height)
+	if want := 7; scale != want {
+		t.Errorf("fitWordmark(%d, %d) scale = %d, want %d (largest scale with 13*scale <= height)", width, height, scale, want)
+	}
+}

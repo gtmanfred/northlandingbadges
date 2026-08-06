@@ -165,7 +165,7 @@ func fitWordmark(width, height int) (string, int) {
 	avail := width - height - gap
 	glyph := basicfont.Face7x13.Advance
 
-	for s := max(1, height/16); s >= 1; s-- {
+	for s := max(1, height/13); s >= 1; s-- {
 		if 13*s > height {
 			continue // the line would not fit the strip's height
 		}
