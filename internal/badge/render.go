@@ -241,15 +241,18 @@ func drawScaled(dst *image.RGBA, x, y, scale int, c color.Color, s string) {
 	draw.NearestNeighbor.Scale(dst, target, small, small.Bounds(), draw.Over, nil)
 }
 
+// truncate shortens s to at most n runes, marking elision with three ASCII
+// periods. basicfont.Face7x13 has no glyph for U+2026, so a real ellipsis
+// renders as a replacement box on the badge artwork.
 func truncate(s string, n int) string {
 	r := []rune(strings.TrimSpace(s))
 	if len(r) <= n {
 		return string(r)
 	}
-	if n <= 1 {
+	if n <= 3 {
 		return string(r[:n])
 	}
-	return string(r[:n-1]) + "…"
+	return string(r[:n-3]) + "..."
 }
 
 func max(a, b int) int {

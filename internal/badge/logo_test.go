@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
 
 	"github.com/northlanding/badges/internal/domain"
 )
@@ -257,5 +258,49 @@ func TestNameCannotRunUnderLogoPanel(t *testing.T) {
 	if rightEdge >= logoPanelX {
 		t.Errorf("a max-length name reaches x=%d, which is inside the panel starting at x=%d",
 			rightEdge, logoPanelX)
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"shorter than n returned unchanged", "Casey", 22, "Casey"},
+		{"exact length returned unchanged", "Casey", 5, "Casey"},
+		{"longer than n elides with three periods", "Bartholomew Fitzwilliam-Chainsworth", 19, "Bartholomew Fitz..."},
+		{"n at the floor uses a hard cut, no periods", "Bartholomew", 3, "Bar"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.s, tt.n)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
+			}
+			if r := []rune(got); len(r) > tt.n {
+				t.Errorf("truncate(%q, %d) = %q, has %d runes, want at most %d", tt.s, tt.n, got, len(r), tt.n)
+			}
+			for _, r := range got {
+				if r == '…' {
+					t.Errorf("truncate(%q, %d) = %q, contains U+2026 (ellipsis rune)", tt.s, tt.n, got)
+				}
+			}
+		})
+	}
+}
+
+func TestTruncateOutputIsRenderableByBasicFont(t *testing.T) {
+	t.Parallel()
+	// A long input forces elision. Every rune of the result must have a glyph
+	// in basicfont.Face7x13, the face render.go draws with; otherwise it
+	// renders as a replacement box on the badge artwork.
+	got := truncate("Bartholomew Fitzwilliam-Chainsworth", maxNameChars)
+	for _, r := range got {
+		if _, _, _, _, ok := basicfont.Face7x13.Glyph(fixed.P(0, 0), r); !ok {
+			t.Errorf("truncate output %q contains rune %q with no glyph in basicfont.Face7x13", got, r)
+		}
 	}
 }
