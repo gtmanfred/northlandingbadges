@@ -109,17 +109,17 @@ type imageURI struct {
 }
 
 type genericObject struct {
-	ID                 string       `json:"id"`
-	ClassID            string       `json:"classId"`
-	GenericType        string       `json:"genericType"`
-	State              string       `json:"state"`
-	CardTitle          localized    `json:"cardTitle"`
-	Header             localized    `json:"header"`
-	Subheader          localized    `json:"subheader"`
-	Logo               *walletImage `json:"logo,omitempty"`
-	HexBackgroundColor string       `json:"hexBackgroundColor"`
-	TextModulesData    []textModule `json:"textModulesData"`
-	Barcode            barcode      `json:"barcode"`
+	ID                 string        `json:"id"`
+	ClassID            string        `json:"classId"`
+	GenericType        string        `json:"genericType"`
+	State              string        `json:"state"`
+	CardTitle          localized     `json:"cardTitle"`
+	Header             localized     `json:"header"`
+	Subheader          localized     `json:"subheader"`
+	Logo               *walletImage  `json:"logo,omitempty"`
+	HexBackgroundColor string        `json:"hexBackgroundColor"`
+	TextModulesData    []textModule  `json:"textModulesData"`
+	Barcode            barcode       `json:"barcode"`
 	ValidTimeInterval  *timeInterval `json:"validTimeInterval,omitempty"`
 }
 

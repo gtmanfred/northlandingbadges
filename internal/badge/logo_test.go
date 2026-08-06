@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 	"time"
 
@@ -302,5 +303,73 @@ func TestTruncateOutputIsRenderableByBasicFont(t *testing.T) {
 		if _, _, _, _, ok := basicfont.Face7x13.Glyph(fixed.P(0, 0), r); !ok {
 			t.Errorf("truncate output %q contains rune %q with no glyph in basicfont.Face7x13", got, r)
 		}
+	}
+}
+
+func TestDrawableFoldsAccentsToASCII(t *testing.T) {
+	t.Parallel()
+	got := drawable("José Müller")
+	want := "Jose Muller"
+	if got != want {
+		t.Errorf("drawable(%q) = %q, want %q", "José Müller", got, want)
+	}
+}
+
+func TestDrawableDropsUnrenderableRunes(t *testing.T) {
+	t.Parallel()
+	// basicfont.Face7x13 has no CJK glyphs and asciiFold has no entries for
+	// them, so they are dropped outright rather than substituted.
+	got := drawable("中文 name")
+	want := " name"
+	if got != want {
+		t.Errorf("drawable(%q) = %q, want %q", "中文 name", got, want)
+	}
+}
+
+func TestDrawableOutputIsRenderableByBasicFont(t *testing.T) {
+	t.Parallel()
+	got := drawable("José Müller, 中文 Naïve façade Straße")
+	for _, r := range got {
+		if _, _, _, _, ok := basicfont.Face7x13.Glyph(fixed.P(0, 0), r); !ok {
+			t.Errorf("drawable output %q contains rune %q with no glyph in basicfont.Face7x13", got, r)
+		}
+	}
+}
+
+func TestRenderAppliesDrawableToName(t *testing.T) {
+	t.Parallel()
+	b := domain.Badge{
+		Registration: domain.Registration{
+			ID:          "DGS-88231",
+			Name:        "José Müller",
+			Email:       "jose@example.com",
+			RawPassType: "Day Pass",
+			PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC),
+		},
+		PassType:  domain.PassTypeDay,
+		ExpiresAt: time.Date(2026, 7, 5, 23, 59, 59, 0, time.UTC),
+	}
+	if _, err := Render(b, time.UTC); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	got := truncate(drawable(b.Registration.Name), maxNameChars)
+	want := "Jose Muller"
+	if got != want {
+		t.Errorf("truncate(drawable(name), maxNameChars) = %q, want %q", got, want)
+	}
+}
+
+func TestDrawableThenTruncateOrderKeepsNameOffPanel(t *testing.T) {
+	t.Parallel()
+	// A name built from runes that expand when folded ('ß' -> "ss", 'Æ' ->
+	// "AE"). If truncate ran before drawable, the pre-fold rune count would
+	// pass the maxNameChars check but the folded result would exceed it and
+	// run under the logo panel, re-breaking the bug fixed in commit 4346ebd.
+	name := strings.Repeat("ß", maxNameChars)
+	got := truncate(drawable(name), maxNameChars)
+	if r := []rune(got); len(r) > maxNameChars {
+		t.Errorf("truncate(drawable(%q), %d) = %q, has %d runes, want at most %d",
+			name, maxNameChars, got, len(r), maxNameChars)
 	}
 }

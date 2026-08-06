@@ -71,6 +71,12 @@ const (
 	maxNameChars = 19
 )
 
+// wordmarkGap is the horizontal space left between the logo panel and the
+// wordmark text beside it. Logo and fitWordmark must agree on this value: if
+// they drift apart the wordmark either overflows the canvas or leaves a
+// mismatched gap.
+const wordmarkGap = 6
+
 // DateLayout is how expirations are printed on artwork and in email copy.
 const DateLayout = "Mon, Jan 2 2006 at 3:04 PM MST"
 
@@ -100,10 +106,10 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	}
 
 	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
-	drawScaled(img, 60, 200, nameScale, colorText, strings.ToUpper(truncate(b.Registration.Name, maxNameChars)))
+	drawScaled(img, 60, 200, nameScale, colorText, strings.ToUpper(truncate(drawable(b.Registration.Name), maxNameChars)))
 	drawScaled(img, 60, 300, 3, accent, strings.ToUpper(b.PassType.Label()))
 	drawScaled(img, 60, 380, 2, colorMuted, expiresLine)
-	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(b.Registration.ID, 32))
+	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(drawable(b.Registration.ID), 32))
 	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing DGC. Not transferable.")
 
 	// Club mark in the empty right-hand region. 200px at x=740 leaves the same
@@ -132,11 +138,7 @@ func Icon(size int) ([]byte, error) {
 	}
 	draw.Draw(img, img.Bounds(), panel, image.Point{}, draw.Over)
 
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode icon: %w", err)
-	}
-	return buf.Bytes(), nil
+	return encodePNG(img, "icon")
 }
 
 // Logo renders the wide strip used as the .pkpass logo: the club mark on its
@@ -160,14 +162,13 @@ func Logo(width, height int) ([]byte, error) {
 	}
 	draw.Draw(img, image.Rect(0, 0, height, height), panel, image.Point{}, draw.Over)
 
-	const gap = 6
 	text, scale := fitWordmark(width, height)
 	if scale == 0 {
 		// Nothing fits; the mark alone carries the strip.
 		return encodePNG(img, "logo")
 	}
 
-	drawScaled(img, height+gap, (height-13*scale)/2, scale, colorAccent, text)
+	drawScaled(img, height+wordmarkGap, (height-13*scale)/2, scale, colorAccent, text)
 	return encodePNG(img, "logo")
 }
 
@@ -180,9 +181,8 @@ func Logo(width, height int) ([]byte, error) {
 // over an ellipsised longer one: dropping "DGC" is acceptable because the club
 // mark beside the text already carries it.
 func fitWordmark(width, height int) (string, int) {
-	const gap = 6
 	candidates := []string{"NORTH LANDING DGC", "NORTH LANDING"}
-	avail := width - height - gap
+	avail := width - height - wordmarkGap
 	glyph := basicfont.Face7x13.Advance
 
 	for s := max(1, height/13); s >= 1; s-- {
