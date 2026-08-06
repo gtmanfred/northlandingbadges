@@ -327,3 +327,63 @@ func TestSaveJWTCarriesLogoURI(t *testing.T) {
 		t.Error("logo contentDescription is empty; alt text is required for accessibility")
 	}
 }
+
+func TestSaveJWTOmitsValidTimeIntervalForFounder(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// Inspect the raw object: an empty date string is invalid to Google, so the
+	// key must be absent entirely rather than present-and-empty.
+	var raw struct {
+		Payload struct {
+			GenericObjects []map[string]json.RawMessage `json:"genericObjects"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if len(raw.Payload.GenericObjects) != 1 {
+		t.Fatalf("got %d generic objects, want 1", len(raw.Payload.GenericObjects))
+	}
+	if v, ok := raw.Payload.GenericObjects[0]["validTimeInterval"]; ok {
+		t.Errorf("validTimeInterval present for a founder badge: %s", v)
+	}
+}
+
+func TestSaveJWTKeepsValidTimeIntervalForExpiringBadge(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if got := claims.Payload.GenericObjects[0].ValidTimeInterval.End.Date; got == "" {
+		t.Error("expiring badge lost its validTimeInterval end date")
+	}
+}

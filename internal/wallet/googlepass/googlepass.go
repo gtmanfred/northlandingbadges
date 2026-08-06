@@ -120,7 +120,7 @@ type genericObject struct {
 	HexBackgroundColor string       `json:"hexBackgroundColor"`
 	TextModulesData    []textModule `json:"textModulesData"`
 	Barcode            barcode      `json:"barcode"`
-	ValidTimeInterval  timeInterval `json:"validTimeInterval"`
+	ValidTimeInterval  *timeInterval `json:"validTimeInterval,omitempty"`
 }
 
 type payload struct {
@@ -147,10 +147,10 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 	// Founder badges never expire: no validity interval, and the text module says
 	// so rather than showing a formatted zero time.
 	expires := "Never"
-	var validInterval timeInterval
+	var validInterval *timeInterval
 	if b.Expires() {
 		expires = b.ExpiresAt.In(loc).Format(time.RFC3339)
-		validInterval = timeInterval{End: dateTime{Date: expires}}
+		validInterval = &timeInterval{End: dateTime{Date: expires}}
 	}
 
 	obj := genericObject{
