@@ -35,17 +35,20 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
 	// Each check is independent of the others, so a failure in one must not
 	// stop the rest from running: the issue this run files should describe
-	// everything that is broken today, not just the first thing found.
+	// everything that is broken today, not just the first thing found. Each
+	// check also gets its own deadline sized to its own work, rather than
+	// sharing one budget: a slow DGS export must not starve the logo check's
+	// timeout and be misreported as an unreachable logo.
+	dgsCtx, dgsCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer dgsCancel()
+
 	var errs []error
-	if err := checkDGSExport(ctx, log); err != nil {
+	if err := checkDGSExport(dgsCtx, log); err != nil {
 		errs = append(errs, err)
 	}
-	if err := checkLogoURI(ctx, &http.Client{Timeout: 15 * time.Second}); err != nil {
+	if err := checkLogoURI(context.Background(), &http.Client{Timeout: 15 * time.Second}); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -77,7 +80,8 @@ func checkDGSExport(ctx context.Context, log *slog.Logger) error {
 		Password:   os.Getenv("DGS_PASSWORD"),
 	}
 	if !cfg.Configured() {
-		return errors.New("DGS_EVENT_SLUG, DGS_SEASON_YEAR, DGS_EMAIL and DGS_PASSWORD are required")
+		log.Warn("skipping the DiscGolfScene contract check: DGS_EVENT_SLUG/DGS_SEASON_YEAR/DGS_EMAIL/DGS_PASSWORD are not configured")
+		return nil
 	}
 
 	client, err := dgs.NewExportClient(cfg, loc, log)
@@ -113,7 +117,15 @@ func checkDGSExport(ctx context.Context, log *slog.Logger) error {
 // checkLogoURI confirms Google can still fetch the club mark. A 404 here means
 // every pass saved from now on renders without a logo, and Google reports
 // nothing back to us when its fetch fails.
+//
+// It derives its own deadline from client.Timeout rather than inheriting the
+// caller's context deadline, so a slow, unrelated check (e.g. the DGS export)
+// cannot starve this one's budget and have a healthy logo misreported as
+// unreachable.
 func checkLogoURI(ctx context.Context, client *http.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, client.Timeout)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, googlepass.LogoURI, nil)
 	if err != nil {
 		return fmt.Errorf("logo check: build request: %w", err)
