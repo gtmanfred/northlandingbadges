@@ -132,10 +132,17 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 		}
 
 		// A PDGA number is optional and free-text upstream, so anything
-		// non-numeric is dropped with a warning rather than failing the row.
+		// non-numeric — or an all-digit value absurdly longer than any real
+		// PDGA number — is dropped with a warning rather than failing the row.
 		pdga := at(pdgaColumn)
-		if pdga != "" && !isAllDigits(pdga) {
+		switch {
+		case pdga == "":
+			// nothing to validate
+		case !isAllDigits(pdga):
 			errs = append(errs, RowError{Row: row, Err: fmt.Errorf("ignoring non-numeric PDGA number %q", pdga)})
+			pdga = ""
+		case len(pdga) > maxPDGADigits:
+			errs = append(errs, RowError{Row: row, Err: fmt.Errorf("ignoring implausibly long PDGA number %q", pdga)})
 			pdga = ""
 		}
 
@@ -156,6 +163,15 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 	}
 	return out, errs
 }
+
+// maxPDGADigits bounds how long an all-digit PDGA number is allowed to be.
+// Real PDGA numbers are at most six digits today; ten leaves generous
+// headroom without admitting absurd input. The cap exists because a
+// thousands-of-digits paste-error would otherwise sail past isAllDigits and
+// reach the QR encoder downstream (qrPanel in internal/badge/logo.go), whose
+// "content too long to encode" error currently fails the whole registration —
+// no email, no wallet passes — rather than just dropping the QR code.
+const maxPDGADigits = 10
 
 // isAllDigits reports whether s consists solely of ASCII digits.
 func isAllDigits(s string) bool {

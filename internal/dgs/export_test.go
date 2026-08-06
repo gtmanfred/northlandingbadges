@@ -197,3 +197,56 @@ func TestParseExportRejectsNonNumericPDGAButKeepsTheRow(t *testing.T) {
 		t.Errorf("warning %q should name the offending value", errs[0].Error())
 	}
 }
+
+func TestParseExportRejectsOverlongPDGAButKeepsTheRow(t *testing.T) {
+	t.Parallel()
+	overlong := strings.Repeat("1", 11)
+	csv := "Division,Name,Email,PDGA#,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com," + overlong + ",11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1 — an overlong PDGA number must not cost a badge", len(got))
+	}
+	if got[0].Registration.PDGANumber != "" {
+		t.Errorf("PDGANumber = %q, want empty for an overlong value", got[0].Registration.PDGANumber)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("errs = %v, want exactly one warning", errs)
+	}
+	if !strings.Contains(errs[0].Error(), overlong) {
+		t.Errorf("warning %q should name the offending value", errs[0].Error())
+	}
+}
+
+func TestParseExportAcceptsTenDigitPDGA(t *testing.T) {
+	t.Parallel()
+	tenDigits := strings.Repeat("1", 10)
+	csv := "Division,Name,Email,PDGA#,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com," + tenDigits + ",11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(got))
+	}
+	if got[0].Registration.PDGANumber != tenDigits {
+		t.Errorf("PDGANumber = %q, want %q", got[0].Registration.PDGANumber, tenDigits)
+	}
+}
+
+func TestParseExportAcceptsRealisticFiveDigitPDGA(t *testing.T) {
+	t.Parallel()
+	csv := "Division,Name,Email,PDGA#,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com,54321,11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(got))
+	}
+	if got[0].Registration.PDGANumber != "54321" {
+		t.Errorf("PDGANumber = %q, want \"54321\"", got[0].Registration.PDGANumber)
+	}
+}

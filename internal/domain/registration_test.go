@@ -171,6 +171,28 @@ func TestPDGAHelpers(t *testing.T) {
 	}
 }
 
+func TestPDGALabel(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		number string
+		want   string
+	}{
+		{"a number on file", "12345", "PDGA #12345"},
+		{"no number", "", ""},
+		{"whitespace-padded", " 12345 ", "PDGA #12345"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := domain.Registration{PDGANumber: tc.number}
+			if got := r.PDGALabel(); got != tc.want {
+				t.Errorf("PDGALabel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateIgnoresPDGANumber(t *testing.T) {
 	t.Parallel()
 	// A PDGA number is optional: its absence must never cost a registrant a badge.

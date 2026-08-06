@@ -51,9 +51,6 @@ type parsedClaims struct {
 			Header      struct {
 				DefaultValue struct{ Value string } `json:"defaultValue"`
 			} `json:"header"`
-			Subheader struct {
-				DefaultValue struct{ Value string } `json:"defaultValue"`
-			} `json:"subheader"`
 			TextModulesData []struct {
 				ID, Header, Body string
 			} `json:"textModulesData"`

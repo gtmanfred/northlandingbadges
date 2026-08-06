@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/smallstep/pkcs7"
@@ -167,7 +166,7 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 			Format:          "PKBarcodeFormatQR",
 			Message:         b.Registration.PDGAURL(),
 			MessageEncoding: "iso-8859-1",
-			AltText:         "PDGA #" + strings.TrimSpace(b.Registration.PDGANumber),
+			AltText:         b.Registration.PDGALabel(),
 		}}
 	}
 

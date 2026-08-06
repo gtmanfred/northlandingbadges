@@ -108,6 +108,17 @@ func (r Registration) PDGAURL() string {
 	return pdgaPlayerBaseURL + n
 }
 
+// PDGALabel is the human-readable badge/QR caption for the registrant's PDGA
+// number, or "" when none is on file. Both wallet renderers show this beneath
+// the QR code, so it lives here rather than being rebuilt in each of them.
+func (r Registration) PDGALabel() string {
+	n := strings.TrimSpace(r.PDGANumber)
+	if n == "" {
+		return ""
+	}
+	return "PDGA #" + n
+}
+
 // ClassifyPassType maps a DiscGolfScene pass label onto a PassType.
 //
 // Matching is case- and whitespace-insensitive. Anything unrecognised returns

@@ -160,7 +160,7 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 		bc = &barcode{
 			Type:          "QR_CODE",
 			Value:         b.Registration.PDGAURL(),
-			AlternateText: "PDGA #" + strings.TrimSpace(b.Registration.PDGANumber),
+			AlternateText: b.Registration.PDGALabel(),
 		}
 	}
 
