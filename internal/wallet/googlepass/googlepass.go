@@ -115,7 +115,6 @@ type genericObject struct {
 	State              string        `json:"state"`
 	CardTitle          localized     `json:"cardTitle"`
 	Header             localized     `json:"header"`
-	Subheader          localized     `json:"subheader"`
 	Logo               *walletImage  `json:"logo,omitempty"`
 	HexBackgroundColor string        `json:"hexBackgroundColor"`
 	TextModulesData    []textModule  `json:"textModulesData"`
@@ -144,13 +143,13 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
-	// Founder badges never expire: no validity interval, and the text module says
-	// so rather than showing a formatted zero time.
-	expires := "Never"
+	// The text module shows a human date; validTimeInterval must stay RFC3339
+	// because Google parses it. Founder badges have neither.
+	expiresText := "Never"
 	var validInterval *timeInterval
 	if b.Expires() {
-		expires = b.ExpiresAt.In(loc).Format(time.RFC3339)
-		validInterval = &timeInterval{End: dateTime{Date: expires}}
+		expiresText = b.ExpiresAt.In(loc).Format(badge.ShortDateLayout)
+		validInterval = &timeInterval{End: dateTime{Date: b.ExpiresAt.In(loc).Format(time.RFC3339)}}
 	}
 
 	obj := genericObject{
@@ -159,15 +158,15 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 		GenericType: "GENERIC_TYPE_UNSPECIFIED",
 		State:       "ACTIVE",
 		CardTitle:   text("North Landing DGC"),
-		Header:      text(b.Registration.Name),
-		Subheader:   text(b.PassType.Label()),
+		Header:      text(b.PassType.Label()),
 		Logo: &walletImage{
 			SourceURI:          imageURI{URI: LogoURI},
 			ContentDescription: text(logoAltText),
 		},
 		HexBackgroundColor: "#0b3d2e",
 		TextModulesData: []textModule{
-			{ID: "expires", Header: "Expires", Body: expires},
+			{ID: "expires", Header: "Expiry Date", Body: expiresText},
+			{ID: "member", Header: "Member", Body: b.Registration.Name},
 			{ID: "registration", Header: "Registration", Body: b.Registration.ID},
 		},
 		Barcode:           barcode{Type: "QR_CODE", Value: b.Registration.ID, AlternateText: b.Registration.ID},
