@@ -360,6 +360,22 @@ func TestRenderAppliesDrawableToName(t *testing.T) {
 	}
 }
 
+func TestShortDateLayoutRendersOnArtwork(t *testing.T) {
+	t.Parallel()
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Date(2026, 12, 31, 23, 59, 59, 0, ny)
+	if got := expires.Format(ShortDateLayout); got != "Dec 31, 2026" {
+		t.Errorf("ShortDateLayout gives %q, want \"Dec 31, 2026\"", got)
+	}
+	// The long layout stays for the email prose, which needs the time of day.
+	if DateLayout == ShortDateLayout {
+		t.Error("DateLayout and ShortDateLayout must stay distinct")
+	}
+}
+
 func TestDrawableThenTruncateOrderKeepsNameOffPanel(t *testing.T) {
 	t.Parallel()
 	// A name built from runes that expand when folded ('ß' -> "ss", 'Æ' ->

@@ -77,8 +77,13 @@ const (
 // mismatched gap.
 const wordmarkGap = 6
 
-// DateLayout is how expirations are printed on artwork and in email copy.
+// DateLayout is how expirations are printed in email copy.
 const DateLayout = "Mon, Jan 2 2006 at 3:04 PM MST"
+
+// ShortDateLayout is how expirations are printed on the badge artwork and the
+// wallet passes: no time of day, which nobody needs on a membership badge, and
+// a month name so there is no day-month ambiguity.
+const ShortDateLayout = "Jan 2, 2006"
 
 // Render draws the badge for b and returns encoded PNG bytes. Times are printed
 // in loc so the artwork matches the club's local expiration.
@@ -102,7 +107,7 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	// Founder badges have no expiration, so the zero ExpiresAt is never formatted.
 	expiresLine := "NO EXPIRATION"
 	if b.Expires() {
-		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(DateLayout))
+		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(ShortDateLayout))
 	}
 
 	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
