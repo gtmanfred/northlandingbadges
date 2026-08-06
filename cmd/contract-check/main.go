@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/dgs"
+	"github.com/northlanding/badges/internal/wallet/googlepass"
 )
 
 func main() {
@@ -33,6 +35,25 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Each check is independent of the others, so a failure in one must not
+	// stop the rest from running: the issue this run files should describe
+	// everything that is broken today, not just the first thing found.
+	var errs []error
+	if err := checkDGSExport(ctx, log); err != nil {
+		errs = append(errs, err)
+	}
+	if err := checkLogoURI(ctx, &http.Client{Timeout: 15 * time.Second}); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// checkDGSExport verifies that the DiscGolfScene club-admin CSV export still
+// carries the columns and rows the pipeline needs.
+func checkDGSExport(ctx context.Context, log *slog.Logger) error {
 	tz := os.Getenv("CLUB_TIMEZONE")
 	if tz == "" {
 		tz = config.DefaultTimezone
@@ -64,9 +85,6 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
 	candidates, errs := client.Fetch(ctx)
 	for _, err := range errs {
 		log.Warn("row or fetch warning", "error", err)
@@ -89,5 +107,27 @@ func run(log *slog.Logger) error {
 
 	log.Info("export output looks healthy",
 		"event", cfg.EventSlug, "candidates", len(candidates), "row_warnings", len(errs))
+	return nil
+}
+
+// checkLogoURI confirms Google can still fetch the club mark. A 404 here means
+// every pass saved from now on renders without a logo, and Google reports
+// nothing back to us when its fetch fails.
+func checkLogoURI(ctx context.Context, client *http.Client) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, googlepass.LogoURI, nil)
+	if err != nil {
+		return fmt.Errorf("logo check: build request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("logo check: %s unreachable: %w", googlepass.LogoURI, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("logo check: %s returned %s, want 200", googlepass.LogoURI, resp.Status)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+		return fmt.Errorf("logo check: %s content-type is %q, want image/*", googlepass.LogoURI, ct)
+	}
 	return nil
 }
