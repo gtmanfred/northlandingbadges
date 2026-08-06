@@ -66,6 +66,10 @@ type Registration struct {
 	// registrations begin in November 2025, so the purchase year is wrong. Zero
 	// for day passes, which expire relative to the purchase date.
 	SeasonYear int
+	// PDGANumber is the registrant's PDGA membership number, empty when they gave
+	// none. Stored as a string because it is only ever printed or concatenated
+	// into a URL; an int would blur "no number" and "number zero".
+	PDGANumber string
 }
 
 // Validate reports whether the registration carries the fields the pipeline
@@ -82,6 +86,26 @@ func (r Registration) Validate() error {
 		return fmt.Errorf("registration %s: missing purchase date", r.ID)
 	}
 	return nil
+}
+
+// pdgaPlayerBaseURL is the public PDGA player-page prefix.
+const pdgaPlayerBaseURL = "https://www.pdga.com/player/"
+
+// HasPDGA reports whether a PDGA number is on file. Badges carry a QR code only
+// when one is: a QR that resolves to nothing is worse than no QR.
+func (r Registration) HasPDGA() bool {
+	return strings.TrimSpace(r.PDGANumber) != ""
+}
+
+// PDGAURL is the registrant's public PDGA player page, or "" when no number is
+// on file. Every surface that renders a QR asks here rather than building the
+// URL itself.
+func (r Registration) PDGAURL() string {
+	n := strings.TrimSpace(r.PDGANumber)
+	if n == "" {
+		return ""
+	}
+	return pdgaPlayerBaseURL + n
 }
 
 // ClassifyPassType maps a DiscGolfScene pass label onto a PassType.

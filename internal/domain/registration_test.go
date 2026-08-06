@@ -143,3 +143,45 @@ func TestRegistrationSeasonYearIsCarried(t *testing.T) {
 		t.Errorf("SeasonYear = %d, want 2026", reg.SeasonYear)
 	}
 }
+
+func TestPDGAHelpers(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		number  string
+		hasPDGA bool
+		url     string
+	}{
+		{"a number on file", "12345", true, "https://www.pdga.com/player/12345"},
+		{"no number", "", false, ""},
+		{"whitespace only", "   ", false, ""},
+		{"surrounding whitespace is trimmed", " 987 ", true, "https://www.pdga.com/player/987"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := domain.Registration{PDGANumber: tc.number}
+			if got := r.HasPDGA(); got != tc.hasPDGA {
+				t.Errorf("HasPDGA() = %v, want %v", got, tc.hasPDGA)
+			}
+			if got := r.PDGAURL(); got != tc.url {
+				t.Errorf("PDGAURL() = %q, want %q", got, tc.url)
+			}
+		})
+	}
+}
+
+func TestValidateIgnoresPDGANumber(t *testing.T) {
+	t.Parallel()
+	// A PDGA number is optional: its absence must never cost a registrant a badge.
+	ny, _ := time.LoadLocation("America/New_York")
+	r := domain.Registration{
+		ID:          "abc123def456",
+		Name:        "Casey Chains",
+		Email:       "casey@example.com",
+		PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, ny),
+	}
+	if err := r.Validate(); err != nil {
+		t.Errorf("Validate() with no PDGA number = %v, want nil", err)
+	}
+}
