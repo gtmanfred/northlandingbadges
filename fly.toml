@@ -5,7 +5,10 @@
 # wakes the app hourly with a request to /tasks/poll (spec §3).
 
 app = "northlandingbadges"
-primary_region = "iad" # closest region to Virginia Beach
+# ord, not the nearer iad: the badges_data volume was created in ord, and a volume
+# cannot be moved between regions. The mount pins the machine to the volume, so ord
+# is where this actually runs. Latency is irrelevant for an hourly poll.
+primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
