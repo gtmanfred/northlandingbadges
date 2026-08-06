@@ -207,6 +207,61 @@ Test keys in `internal/testkeys/` are self-signed throwaways so CI can verify
 signing with no secrets. They are not Apple or Google credentials and no device
 will trust them.
 
+### Google Wallet class template
+
+The card layout — which `textModulesData` rows show on the pass FACE, versus
+buried in the details area below it — lives on the Google Wallet **class**,
+not in this codebase. `SaveJWT` only fills in the object; without a
+`classTemplateInfo.cardTemplateOverride` on the class, Google files every text
+module below the card and the pass shows no expiry at all (confirmed by
+minting a mockup and viewing it on a phone).
+
+The class has already been PATCHed by hand with the override below, saved as
+`docs/google-wallet-class-template.json`:
+
+```json
+{
+  "classTemplateInfo": {
+    "cardTemplateOverride": {
+      "cardRowTemplateInfos": [
+        {
+          "twoItems": {
+            "startItem": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['expires']" }] }
+            },
+            "endItem": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['member']" }] }
+            }
+          }
+        },
+        {
+          "oneItem": {
+            "item": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['registration']" }] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Each `fieldPath` binds to a `textModulesData` id emitted by `SaveJWT`
+(`expires`, `member`, `registration`). Renaming an id in code without
+re-PATCHing the class silently empties that row on every pass — nothing
+fails loudly, the row just goes blank.
+
+Nothing in this codebase manages Wallet classes, so if the class ever needs
+recreating, reapply the override by hand:
+
+```sh
+curl -X PATCH \
+  "https://walletobjects.googleapis.com/walletobjects/v1/genericClass/$GOOGLE_CLASS_ID" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d @docs/google-wallet-class-template.json
+```
+
 ## Layout
 
 ```

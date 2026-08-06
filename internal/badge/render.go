@@ -71,14 +71,27 @@ const (
 	maxNameChars = 19
 )
 
+// QR panel geometry on the badge. It sits directly below the logo panel and
+// shares its right margin. Only drawn when the registrant has a PDGA number.
+const (
+	qrPanelSize = 200
+	qrPanelX    = 740
+	qrPanelY    = 280
+)
+
 // wordmarkGap is the horizontal space left between the logo panel and the
 // wordmark text beside it. Logo and fitWordmark must agree on this value: if
 // they drift apart the wordmark either overflows the canvas or leaves a
 // mismatched gap.
 const wordmarkGap = 6
 
-// DateLayout is how expirations are printed on artwork and in email copy.
+// DateLayout is how expirations are printed in email copy.
 const DateLayout = "Mon, Jan 2 2006 at 3:04 PM MST"
+
+// ShortDateLayout is how expirations are printed on the badge artwork and the
+// wallet passes: no time of day, which nobody needs on a membership badge, and
+// a month name so there is no day-month ambiguity.
+const ShortDateLayout = "Jan 2, 2006"
 
 // Render draws the badge for b and returns encoded PNG bytes. Times are printed
 // in loc so the artwork matches the club's local expiration.
@@ -102,7 +115,7 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	// Founder badges have no expiration, so the zero ExpiresAt is never formatted.
 	expiresLine := "NO EXPIRATION"
 	if b.Expires() {
-		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(DateLayout))
+		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(ShortDateLayout))
 	}
 
 	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
@@ -119,6 +132,16 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 		return nil, err
 	}
 	draw.Draw(img, image.Rect(logoPanelX, logoPanelY, logoPanelX+logoPanelSize, logoPanelY+logoPanelSize), panel, image.Point{}, draw.Over)
+
+	// The QR points at the registrant's PDGA page, so there is nothing to draw
+	// when no number is on file.
+	if b.Registration.HasPDGA() {
+		qr, err := qrPanel(b.Registration.PDGAURL(), qrPanelSize)
+		if err != nil {
+			return nil, err
+		}
+		draw.Draw(img, image.Rect(qrPanelX, qrPanelY, qrPanelX+qrPanelSize, qrPanelY+qrPanelSize), qr, image.Point{}, draw.Over)
+	}
 
 	return encodePNG(img, "png")
 }

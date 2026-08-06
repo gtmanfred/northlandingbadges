@@ -1,0 +1,25 @@
+{
+  "classTemplateInfo": {
+    "cardTemplateOverride": {
+      "cardRowTemplateInfos": [
+        {
+          "twoItems": {
+            "startItem": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['expires']" }] }
+            },
+            "endItem": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['member']" }] }
+            }
+          }
+        },
+        {
+          "oneItem": {
+            "item": {
+              "firstValue": { "fields": [{ "fieldPath": "object.textModulesData['registration']" }] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

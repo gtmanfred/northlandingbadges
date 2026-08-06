@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
@@ -78,6 +79,38 @@ func logoPanel(size int) (*image.RGBA, error) {
 	// disintegrates under nearest-neighbour downscaling.
 	draw.CatmullRom.Scale(panel, target, mark, mark.Bounds(), draw.Over, nil)
 
+	return panel, nil
+}
+
+// qrPanelInset is how far the code is inset inside its white card. Deliberately
+// tighter than the logo panel's size/12: padding costs QR modules, and at the
+// logo's inset a 200px card leaves only 168px of code at roughly 4.5px per
+// module. Scannability outranks matching the logo's padding exactly.
+const qrPanelInset = 20
+
+// qrPanel renders url as a QR code on a rounded white card of size×size pixels.
+//
+// The card reuses the logo panel's rounded-corner mask so the two right-column
+// elements on the badge read as one design language; a hard-edged square below a
+// rounded card looks unintentional.
+//
+// Medium error correction is the sensible default for a code viewed in an email:
+// it survives some scaling without inflating the module count the way High would.
+func qrPanel(url string, size int) (*image.RGBA, error) {
+	if size < 32 {
+		return nil, fmt.Errorf("badge: qr size %d too small", size)
+	}
+	code, err := qrcode.New(url, qrcode.Medium)
+	if err != nil {
+		return nil, fmt.Errorf("badge: encode qr: %w", err)
+	}
+
+	panel := image.NewRGBA(image.Rect(0, 0, size, size))
+	drawRoundedRect(panel, size, size/8, color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF})
+
+	inset := size / qrPanelInset
+	src := code.Image(size - 2*inset)
+	draw.Draw(panel, image.Rect(inset, inset, size-inset, size-inset), src, src.Bounds().Min, draw.Src)
 	return panel, nil
 }
 

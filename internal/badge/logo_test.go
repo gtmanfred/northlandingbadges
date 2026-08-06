@@ -360,6 +360,22 @@ func TestRenderAppliesDrawableToName(t *testing.T) {
 	}
 }
 
+func TestShortDateLayoutRendersOnArtwork(t *testing.T) {
+	t.Parallel()
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Date(2026, 12, 31, 23, 59, 59, 0, ny)
+	if got := expires.Format(ShortDateLayout); got != "Dec 31, 2026" {
+		t.Errorf("ShortDateLayout gives %q, want \"Dec 31, 2026\"", got)
+	}
+	// The long layout stays for the email prose, which needs the time of day.
+	if DateLayout == ShortDateLayout {
+		t.Error("DateLayout and ShortDateLayout must stay distinct")
+	}
+}
+
 func TestDrawableThenTruncateOrderKeepsNameOffPanel(t *testing.T) {
 	t.Parallel()
 	// A name built from runes that expand when folded ('ß' -> "ss", 'Æ' ->
@@ -371,5 +387,115 @@ func TestDrawableThenTruncateOrderKeepsNameOffPanel(t *testing.T) {
 	if r := []rune(got); len(r) > maxNameChars {
 		t.Errorf("truncate(drawable(%q), %d) = %q, has %d runes, want at most %d",
 			name, maxNameChars, got, len(r), maxNameChars)
+	}
+}
+
+func TestQRPanelEncodesTheURL(t *testing.T) {
+	t.Parallel()
+	panel, err := qrPanel("https://www.pdga.com/player/12345", 200)
+	if err != nil {
+		t.Fatalf("qrPanel: %v", err)
+	}
+	if panel.Bounds().Dx() != 200 || panel.Bounds().Dy() != 200 {
+		t.Fatalf("bounds = %v, want 200x200", panel.Bounds())
+	}
+	// A QR is black modules on white: both must be present, or we drew a blank.
+	var dark, light int
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 200; x++ {
+			r, _, _, _ := panel.At(x, y).RGBA()
+			if r < 0x4000 {
+				dark++
+			} else {
+				light++
+			}
+		}
+	}
+	if dark == 0 || light == 0 {
+		t.Errorf("dark=%d light=%d — the QR did not render", dark, light)
+	}
+}
+
+func TestRenderDrawsQRWhenPDGAKnown(t *testing.T) {
+	t.Parallel()
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := domain.Badge{
+		Registration: domain.Registration{
+			ID:          "abc123def456",
+			Name:        "Casey Chains",
+			Email:       "casey@example.com",
+			PDGANumber:  "12345",
+			PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, ny),
+		},
+		PassType:  domain.PassTypeSeason,
+		ExpiresAt: time.Date(2026, 12, 31, 23, 59, 59, 0, ny),
+	}
+	data, err := Render(b, ny)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// The composited QR must match a freshly encoded reference exactly. This
+	// proves placement and compositing; scannability is a manual phone check.
+	want, err := qrPanel(b.Registration.PDGAURL(), qrPanelSize)
+	if err != nil {
+		t.Fatalf("reference qrPanel: %v", err)
+	}
+	for y := 0; y < qrPanelSize; y++ {
+		for x := 0; x < qrPanelSize; x++ {
+			// Outside the rounded radius, the reference panel is fully
+			// transparent (RGB reads as black), but the composited badge
+			// shows the opaque background through it. Comparing those
+			// pixels via sameRGB (which ignores alpha) would fail on a
+			// correct render, so only the drawn card itself is checked here.
+			if !insideRounded(x, y, qrPanelSize, qrPanelSize/8) {
+				continue
+			}
+			got := img.At(qrPanelX+x, qrPanelY+y)
+			if !sameRGB(got, want.At(x, y)) {
+				t.Fatalf("pixel (%d,%d) in the QR region = %v, want %v", x, y, got, want.At(x, y))
+			}
+		}
+	}
+}
+
+func TestRenderOmitsQRWithoutPDGA(t *testing.T) {
+	t.Parallel()
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := domain.Badge{
+		Registration: domain.Registration{
+			ID:          "abc123def456",
+			Name:        "Casey Chains",
+			Email:       "casey@example.com",
+			PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, ny),
+		},
+		PassType:  domain.PassTypeSeason,
+		ExpiresAt: time.Date(2026, 12, 31, 23, 59, 59, 0, ny),
+	}
+	data, err := Render(b, ny)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The whole QR region must be plain background.
+	for y := qrPanelY; y < qrPanelY+qrPanelSize; y += 7 {
+		for x := qrPanelX; x < qrPanelX+qrPanelSize; x += 7 {
+			if got := img.At(x, y); !sameRGB(got, colorBackground) {
+				t.Fatalf("pixel (%d,%d) = %v, want background with no PDGA number", x, y, got)
+			}
+		}
 	}
 }

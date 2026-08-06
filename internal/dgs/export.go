@@ -25,6 +25,11 @@ var exportColumns = map[string]string{
 	"date":     "registration date est",
 }
 
+// pdgaColumn is read when present but never required: an export without it must
+// still produce badges, so it is deliberately kept out of exportColumns, which
+// drives the ErrMissingColumn check.
+const pdgaColumn = "pdga#"
+
 // idLength is how much of the SHA-256 hex digest becomes the registration ID.
 // Twelve hex characters is 48 bits — ample for a few hundred members a season,
 // and short enough to print on a badge.
@@ -73,6 +78,9 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 			if norm == want {
 				index[field] = pos
 			}
+		}
+		if norm == pdgaColumn {
+			index[pdgaColumn] = pos
 		}
 	}
 	for field := range exportColumns {
@@ -123,6 +131,21 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 			continue
 		}
 
+		// A PDGA number is optional and free-text upstream, so anything
+		// non-numeric — or an all-digit value absurdly longer than any real
+		// PDGA number — is dropped with a warning rather than failing the row.
+		pdga := at(pdgaColumn)
+		switch {
+		case pdga == "":
+			// nothing to validate
+		case !isAllDigits(pdga):
+			errs = append(errs, RowError{Row: row, Err: fmt.Errorf("ignoring non-numeric PDGA number %q", pdga)})
+			pdga = ""
+		case len(pdga) > maxPDGADigits:
+			errs = append(errs, RowError{Row: row, Err: fmt.Errorf("ignoring implausibly long PDGA number %q", pdga)})
+			pdga = ""
+		}
+
 		reg := domain.Registration{
 			ID:          id,
 			Name:        at("name"),
@@ -130,6 +153,7 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 			RawPassType: division,
 			PurchasedAt: purchasedAt,
 			SeasonYear:  seasonYear,
+			PDGANumber:  pdga,
 		}
 		if err := reg.Validate(); err != nil {
 			errs = append(errs, RowError{Row: row, Err: err})
@@ -138,4 +162,23 @@ func ParseExport(r io.Reader, eventSlug string, seasonYear int, loc *time.Locati
 		out = append(out, domain.Candidate{Registration: reg, PassType: passType})
 	}
 	return out, errs
+}
+
+// maxPDGADigits bounds how long an all-digit PDGA number is allowed to be.
+// Real PDGA numbers are at most six digits today; ten leaves generous
+// headroom without admitting absurd input. The cap exists because a
+// thousands-of-digits paste-error would otherwise sail past isAllDigits and
+// reach the QR encoder downstream (qrPanel in internal/badge/logo.go), whose
+// "content too long to encode" error currently fails the whole registration —
+// no email, no wallet passes — rather than just dropping the QR code.
+const maxPDGADigits = 10
+
+// isAllDigits reports whether s consists solely of ASCII digits.
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }

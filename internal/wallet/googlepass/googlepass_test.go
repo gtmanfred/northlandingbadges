@@ -51,15 +51,13 @@ type parsedClaims struct {
 			Header      struct {
 				DefaultValue struct{ Value string } `json:"defaultValue"`
 			} `json:"header"`
-			Subheader struct {
-				DefaultValue struct{ Value string } `json:"defaultValue"`
-			} `json:"subheader"`
 			TextModulesData []struct {
 				ID, Header, Body string
 			} `json:"textModulesData"`
 			Barcode struct {
-				Type  string `json:"type"`
-				Value string `json:"value"`
+				Type          string `json:"type"`
+				Value         string `json:"value"`
+				AlternateText string `json:"alternateText"`
 			} `json:"barcode"`
 			Logo struct {
 				SourceURI struct {
@@ -131,20 +129,24 @@ func TestSaveJWTVerifiesAndCarriesExpiration(t *testing.T) {
 			expiresModule = m.Body
 		}
 	}
-	if expiresModule != wantExpiry {
-		t.Errorf("expires module = %q, want %q", expiresModule, wantExpiry)
+	wantExpiryText := b.ExpiresAt.In(ny).Format(badge.ShortDateLayout)
+	if expiresModule != wantExpiryText {
+		t.Errorf("expires module = %q, want %q", expiresModule, wantExpiryText)
 	}
 	if obj.ClassID != testConfig().ClassID {
 		t.Errorf("classId = %q", obj.ClassID)
 	}
-	if obj.Header.DefaultValue.Value != b.Registration.Name {
-		t.Errorf("header = %q, want guest name", obj.Header.DefaultValue.Value)
+	if obj.Header.DefaultValue.Value != "Day Pass" {
+		t.Errorf("header = %q, want the tier label", obj.Header.DefaultValue.Value)
 	}
-	if obj.Subheader.DefaultValue.Value != "Day Pass" {
-		t.Errorf("subheader = %q, want pass type", obj.Subheader.DefaultValue.Value)
+	var memberModule string
+	for _, m := range obj.TextModulesData {
+		if m.ID == "member" {
+			memberModule = m.Body
+		}
 	}
-	if obj.Barcode.Value != b.Registration.ID {
-		t.Errorf("barcode value = %q, want registration id", obj.Barcode.Value)
+	if memberModule != b.Registration.Name {
+		t.Errorf("member module = %q, want guest name", memberModule)
 	}
 }
 
@@ -385,5 +387,181 @@ func TestSaveJWTKeepsValidTimeIntervalForExpiringBadge(t *testing.T) {
 	}
 	if got := claims.Payload.GenericObjects[0].ValidTimeInterval.End.Date; got == "" {
 		t.Error("expiring badge lost its validTimeInterval end date")
+	}
+}
+
+func TestSaveJWTUsesLabelledReferenceLayout(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := testBadge()
+	b.PassType = domain.PassTypeSeason
+	b.ExpiresAt = time.Date(2026, 12, 31, 23, 59, 59, 0, ny)
+
+	jwt, err := issuer.SaveJWT(b, ny)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	obj := claims.Payload.GenericObjects[0]
+
+	if got := obj.Header.DefaultValue.Value; got != "Season Member" {
+		t.Errorf("header = %q, want the tier label \"Season Member\"", got)
+	}
+
+	want := []struct{ id, header, body string }{
+		{"expires", "Expiry Date", "Dec 31, 2026"},
+		{"member", "Member", b.Registration.Name},
+		{"registration", "Registration", b.Registration.ID},
+	}
+	if len(obj.TextModulesData) != len(want) {
+		t.Fatalf("got %d text modules, want %d", len(obj.TextModulesData), len(want))
+	}
+	for i, w := range want {
+		got := obj.TextModulesData[i]
+		if got.ID != w.id || got.Header != w.header || got.Body != w.body {
+			t.Errorf("module %d = {%q %q %q}, want {%q %q %q}",
+				i, got.ID, got.Header, got.Body, w.id, w.header, w.body)
+		}
+	}
+
+	// validTimeInterval stays machine-readable RFC3339, not display text.
+	if got := obj.ValidTimeInterval.End.Date; got != "2026-12-31T23:59:59-05:00" {
+		t.Errorf("validTimeInterval end = %q, want RFC3339", got)
+	}
+}
+
+func TestSaveJWTDropsSubheader(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var raw struct {
+		Payload struct {
+			GenericObjects []map[string]json.RawMessage `json:"genericObjects"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := raw.Payload.GenericObjects[0]["subheader"]; ok {
+		t.Errorf("subheader still present: %s", v)
+	}
+}
+
+func TestSaveJWTShowsNeverForFounderExpiry(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	obj := claims.Payload.GenericObjects[0]
+	if got := obj.Header.DefaultValue.Value; got != "Founder" {
+		t.Errorf("header = %q, want \"Founder\"", got)
+	}
+	if got := obj.TextModulesData[0].Body; got != "Never" {
+		t.Errorf("expiry body = %q, want \"Never\"", got)
+	}
+}
+
+func TestSaveJWTBarcodeLinksToPDGAPage(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.Registration.PDGANumber = "12345"
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	bc := claims.Payload.GenericObjects[0].Barcode
+	if bc.Type != "QR_CODE" {
+		t.Errorf("barcode type = %q, want QR_CODE", bc.Type)
+	}
+	if bc.Value != "https://www.pdga.com/player/12345" {
+		t.Errorf("barcode value = %q, want the PDGA player URL", bc.Value)
+	}
+	if bc.AlternateText != "PDGA #12345" {
+		t.Errorf("alternateText = %q, want \"PDGA #12345\"", bc.AlternateText)
+	}
+}
+
+func TestSaveJWTOmitsBarcodeWithoutPDGANumber(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.Registration.PDGANumber = ""
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	// Raw keys: a typed struct cannot tell an absent barcode from an empty one.
+	var raw struct {
+		Payload struct {
+			GenericObjects []map[string]json.RawMessage `json:"genericObjects"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := raw.Payload.GenericObjects[0]["barcode"]; ok {
+		t.Errorf("barcode present with no PDGA number: %s", v)
 	}
 }
