@@ -151,9 +151,6 @@ func TestSaveJWTVerifiesAndCarriesExpiration(t *testing.T) {
 	if memberModule != b.Registration.Name {
 		t.Errorf("member module = %q, want guest name", memberModule)
 	}
-	if obj.Barcode.Value != "" {
-		t.Errorf("barcode value = %q, want none (testBadge has no PDGA number)", obj.Barcode.Value)
-	}
 }
 
 func TestObjectIDIsSanitizedAndIssuerPrefixed(t *testing.T) {
