@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/smallstep/pkcs7"
@@ -110,6 +111,7 @@ type field struct {
 type barcode struct {
 	Format          string `json:"format"`
 	Message         string `json:"message"`
+	AltText         string `json:"altText,omitempty"`
 	MessageEncoding string `json:"messageEncoding"`
 }
 
@@ -132,7 +134,7 @@ type pass struct {
 	ForegroundColor    string    `json:"foregroundColor"`
 	BackgroundColor    string    `json:"backgroundColor"`
 	LabelColor         string    `json:"labelColor"`
-	Barcodes           []barcode `json:"barcodes"`
+	Barcodes           []barcode `json:"barcodes,omitempty"`
 	Generic            structure `json:"generic"`
 }
 
@@ -157,6 +159,18 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 		terms = "Non-transferable. Valid only through the expiration shown."
 	}
 
+	// The QR is a member convenience pointing at their PDGA page. No number on
+	// file means no barcode, rather than one that resolves to nothing.
+	var barcodes []barcode
+	if b.Registration.HasPDGA() {
+		barcodes = []barcode{{
+			Format:          "PKBarcodeFormatQR",
+			Message:         b.Registration.PDGAURL(),
+			MessageEncoding: "iso-8859-1",
+			AltText:         "PDGA #" + strings.TrimSpace(b.Registration.PDGANumber),
+		}}
+	}
+
 	p := pass{
 		FormatVersion:      1,
 		PassTypeIdentifier: s.cfg.PassTypeIdentifier,
@@ -169,11 +183,7 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 		ForegroundColor:    "rgb(255,255,255)",
 		BackgroundColor:    "rgb(11,61,46)",
 		LabelColor:         "rgb(232,180,58)",
-		Barcodes: []barcode{{
-			Format:          "PKBarcodeFormatQR",
-			Message:         b.Registration.ID,
-			MessageEncoding: "iso-8859-1",
-		}},
+		Barcodes:           barcodes,
 		Generic: structure{
 			PrimaryFields: []field{
 				{Key: "guest", Label: "GUEST", Value: b.Registration.Name},

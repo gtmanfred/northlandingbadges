@@ -330,6 +330,72 @@ func founderBadge() domain.Badge {
 	return b
 }
 
+// passJSONFor builds the unsigned pass.json for b, following the same route
+// as TestDayPassExpirationUsesClubLocalTime and
+// TestPassJSONOmitsExpirationForFounder: Signer.PassJSON is already exported
+// for exactly this purpose, so there is no need to sign a full bundle and
+// unzip it just to inspect the JSON.
+func passJSONFor(t *testing.T, b domain.Badge) ([]byte, error) {
+	t.Helper()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	return signer.PassJSON(b, time.UTC)
+}
+
+func TestPassBarcodeLinksToPDGAPage(t *testing.T) {
+	t.Parallel()
+	// Build the pass.json for a badge with a PDGA number and assert the barcode.
+	b := testBadge()
+	b.Registration.PDGANumber = "12345"
+
+	data, err := passJSONFor(t, b)
+	if err != nil {
+		t.Fatalf("pass json: %v", err)
+	}
+	var p struct {
+		Barcodes []struct {
+			Format          string `json:"format"`
+			Message         string `json:"message"`
+			AltText         string `json:"altText"`
+			MessageEncoding string `json:"messageEncoding"`
+		} `json:"barcodes"`
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.Barcodes) != 1 {
+		t.Fatalf("got %d barcodes, want 1", len(p.Barcodes))
+	}
+	if p.Barcodes[0].Message != "https://www.pdga.com/player/12345" {
+		t.Errorf("message = %q, want the PDGA player URL", p.Barcodes[0].Message)
+	}
+	if p.Barcodes[0].AltText != "PDGA #12345" {
+		t.Errorf("altText = %q, want \"PDGA #12345\"", p.Barcodes[0].AltText)
+	}
+}
+
+func TestPassOmitsBarcodeWithoutPDGANumber(t *testing.T) {
+	t.Parallel()
+	b := testBadge()
+	b.Registration.PDGANumber = ""
+
+	data, err := passJSONFor(t, b)
+	if err != nil {
+		t.Fatalf("pass json: %v", err)
+	}
+	var p struct {
+		Barcodes []json.RawMessage `json:"barcodes"`
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.Barcodes) != 0 {
+		t.Errorf("got %d barcodes with no PDGA number, want none", len(p.Barcodes))
+	}
+}
+
 func TestPassJSONOmitsExpirationForFounder(t *testing.T) {
 	t.Parallel()
 	signer, err := applepass.NewSigner(testConfig())
