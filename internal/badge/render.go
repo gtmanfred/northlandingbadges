@@ -71,6 +71,14 @@ const (
 	maxNameChars = 19
 )
 
+// QR panel geometry on the badge. It sits directly below the logo panel and
+// shares its right margin. Only drawn when the registrant has a PDGA number.
+const (
+	qrPanelSize = 200
+	qrPanelX    = 740
+	qrPanelY    = 280
+)
+
 // wordmarkGap is the horizontal space left between the logo panel and the
 // wordmark text beside it. Logo and fitWordmark must agree on this value: if
 // they drift apart the wordmark either overflows the canvas or leaves a
@@ -124,6 +132,16 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 		return nil, err
 	}
 	draw.Draw(img, image.Rect(logoPanelX, logoPanelY, logoPanelX+logoPanelSize, logoPanelY+logoPanelSize), panel, image.Point{}, draw.Over)
+
+	// The QR points at the registrant's PDGA page, so there is nothing to draw
+	// when no number is on file.
+	if b.Registration.HasPDGA() {
+		qr, err := qrPanel(b.Registration.PDGAURL(), qrPanelSize)
+		if err != nil {
+			return nil, err
+		}
+		draw.Draw(img, image.Rect(qrPanelX, qrPanelY, qrPanelX+qrPanelSize, qrPanelY+qrPanelSize), qr, image.Point{}, draw.Over)
+	}
 
 	return encodePNG(img, "png")
 }
