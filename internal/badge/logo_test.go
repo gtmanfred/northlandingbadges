@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/image/font/basicfont"
+
 	"github.com/northlanding/badges/internal/domain"
 )
 
@@ -246,4 +248,14 @@ func sameRGB(got, want color.Color) bool {
 	gr, gg, gb, _ := got.RGBA()
 	wr, wg, wb, _ := want.RGBA()
 	return gr == wr && gg == wg && gb == wb
+}
+
+func TestNameCannotRunUnderLogoPanel(t *testing.T) {
+	t.Parallel()
+	// drawScaled advances 7px per glyph per scale unit, starting at x=60.
+	rightEdge := 60 + basicfont.Face7x13.Advance*maxNameChars*nameScale
+	if rightEdge >= logoPanelX {
+		t.Errorf("a max-length name reaches x=%d, which is inside the panel starting at x=%d",
+			rightEdge, logoPanelX)
+	}
 }

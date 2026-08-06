@@ -56,6 +56,21 @@ const (
 	Height = 560
 )
 
+// Logo panel geometry on the badge. The text block must not run under the
+// panel: it is composited after the text, so anything beneath it disappears.
+const (
+	logoPanelSize = 200
+	logoPanelX    = 740
+	logoPanelY    = 60
+)
+
+// maxNameChars is the longest name the headline can show without running under
+// the logo panel: 60 + 7*maxNameChars*nameScale must stay below logoPanelX.
+const (
+	nameScale    = 5
+	maxNameChars = 19
+)
+
 // DateLayout is how expirations are printed on artwork and in email copy.
 const DateLayout = "Mon, Jan 2 2006 at 3:04 PM MST"
 
@@ -85,7 +100,7 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	}
 
 	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
-	drawScaled(img, 60, 200, 5, colorText, strings.ToUpper(truncate(b.Registration.Name, 22)))
+	drawScaled(img, 60, 200, nameScale, colorText, strings.ToUpper(truncate(b.Registration.Name, maxNameChars)))
 	drawScaled(img, 60, 300, 3, accent, strings.ToUpper(b.PassType.Label()))
 	drawScaled(img, 60, 380, 2, colorMuted, expiresLine)
 	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(b.Registration.ID, 32))
@@ -93,12 +108,11 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 
 	// Club mark in the empty right-hand region. 200px at x=740 leaves the same
 	// 60px right margin the text block uses.
-	const panelSize = 200
-	panel, err := logoPanel(panelSize)
+	panel, err := logoPanel(logoPanelSize)
 	if err != nil {
 		return nil, err
 	}
-	draw.Draw(img, image.Rect(740, 60, 740+panelSize, 60+panelSize), panel, image.Point{}, draw.Over)
+	draw.Draw(img, image.Rect(logoPanelX, logoPanelY, logoPanelX+logoPanelSize, logoPanelY+logoPanelSize), panel, image.Point{}, draw.Over)
 
 	return encodePNG(img, "png")
 }
