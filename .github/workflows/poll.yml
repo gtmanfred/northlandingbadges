@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: trigger poll cycle
         env:
-          APP_URL: ${{ vars.APP_URL || 'https://north-landing-badges.fly.dev' }}
+          APP_URL: ${{ vars.APP_URL || 'https://northlandingbadges.fly.dev' }}
           POLL_TRIGGER_TOKEN: ${{ secrets.POLL_TRIGGER_TOKEN }}
         run: |
           set -euo pipefail

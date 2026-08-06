@@ -152,7 +152,7 @@ curl -X POST localhost:8080/webhooks/discgolfscene \
 ## Deployment
 
 ```sh
-fly launch --no-deploy            # or: fly apps create north-landing-badges
+fly launch --no-deploy            # or: fly apps create northlandingbadges
 fly volumes create badges_data --region iad --size 1
 
 fly secrets set \

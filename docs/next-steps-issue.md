@@ -144,7 +144,7 @@ Design: `docs/superpowers/specs/2026-07-31-csv-export-ingest-design.md`.
 
 ## 6. Fly.io deployment
 
-- [ ] `fly apps create north-landing-badges` (or `fly launch --no-deploy`).
+- [ ] `fly apps create northlandingbadges` (or `fly launch --no-deploy`).
 - [ ] `fly volumes create badges_data --region iad --size 1` — the dedupe ledger lives
       here; without it, a machine restart re-mails everyone.
 - [ ] Set all secrets (see README "Deployment").

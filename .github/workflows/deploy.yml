@@ -52,7 +52,7 @@ jobs:
 
       - name: post-deploy smoke test
         env:
-          APP_URL: ${{ vars.APP_URL || 'https://north-landing-badges.fly.dev' }}
+          APP_URL: ${{ vars.APP_URL || 'https://northlandingbadges.fly.dev' }}
           # Set this repo variable to the mode you expect in production. Left unset
           # it defaults to live, so a deploy accidentally left in dry_run or
           # allowlist fails here rather than silently swallowing real badges.
