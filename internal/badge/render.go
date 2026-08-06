@@ -119,19 +119,51 @@ func Icon(size int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Logo renders the wide wordmark used as the .pkpass logo.
+// Logo renders the wide strip used as the .pkpass logo: the club mark on its
+// white card, followed by the wordmark.
+//
+// The panel consumes height pixels of width, so the wordmark is scaled down and
+// truncated to whatever remains rather than overflowing the canvas. At 160x50
+// that means an abbreviated wordmark.
 func Logo(width, height int) ([]byte, error) {
 	if width < 32 || height < 12 {
 		return nil, fmt.Errorf("badge: logo %dx%d too small", width, height)
 	}
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	fill(img, img.Bounds(), colorBackground)
-	scale := max(1, height/16)
-	drawScaled(img, 4, (height-13*scale)/2, scale, colorAccent, "NORTH LANDING DGC")
 
+	panel, err := logoPanel(height)
+	if err != nil {
+		return nil, err
+	}
+	draw.Draw(img, image.Rect(0, 0, height, height), panel, image.Point{}, draw.Over)
+
+	const gap = 6
+	text := "NORTH LANDING DGC"
+	avail := width - height - gap
+	glyph := basicfont.Face7x13.Advance
+
+	scale := max(1, height/16)
+	for scale > 1 && glyph*len(text)*scale > avail {
+		scale--
+	}
+	if maxChars := avail / (glyph * scale); maxChars < len(text) {
+		if maxChars < 1 {
+			// No room for a wordmark at all; the mark alone carries the strip.
+			return encodePNG(img, "logo")
+		}
+		text = truncate(text, maxChars)
+	}
+
+	drawScaled(img, height+gap, (height-13*scale)/2, scale, colorAccent, text)
+	return encodePNG(img, "logo")
+}
+
+// encodePNG serialises img, labelling errors with what was being encoded.
+func encodePNG(img *image.RGBA, what string) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode logo: %w", err)
+		return nil, fmt.Errorf("badge: encode %s: %w", what, err)
 	}
 	return buf.Bytes(), nil
 }

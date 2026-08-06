@@ -113,3 +113,58 @@ func TestIconDrawsLogoPanel(t *testing.T) {
 		t.Error("no green-dominant pixel; the icon is not drawing the club mark")
 	}
 }
+
+func TestLogoPlacesPanelLeftOfWordmark(t *testing.T) {
+	t.Parallel()
+	const w, h = 320, 100
+	data, err := Logo(w, h)
+	if err != nil {
+		t.Fatalf("Logo: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// The panel occupies the leading h×h square.
+	if !isWhitish(img.At(h/2, 6)) {
+		t.Errorf("pixel inside the panel = %v, want whitish card", img.At(h/2, 6))
+	}
+
+	// The wordmark sits to the right of the panel, drawn in the accent colour.
+	accent := colorAccent
+	found := false
+	for x := h; x < w && !found; x++ {
+		for y := 0; y < h; y++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			ar, ag, ab, _ := accent.RGBA()
+			if a > 0x8000 && r == ar && g == ag && b == ab {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("no accent-coloured wordmark pixel to the right of the panel")
+	}
+}
+
+func TestLogoFitsWordmarkInNarrowStrip(t *testing.T) {
+	t.Parallel()
+	// 160x50 is the pkpass logo.png size. The wordmark must not overflow the
+	// canvas once the panel takes its 50px.
+	data, err := Logo(160, 50)
+	if err != nil {
+		t.Fatalf("Logo: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if img.Bounds().Dx() != 160 || img.Bounds().Dy() != 50 {
+		t.Errorf("bounds = %v, want 160x50", img.Bounds())
+	}
+	if !isWhitish(img.At(25, 4)) {
+		t.Errorf("pixel inside the panel = %v, want whitish card", img.At(25, 4))
+	}
+}
