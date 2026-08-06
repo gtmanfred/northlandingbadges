@@ -5,6 +5,9 @@ import (
 	"image/color"
 	"image/png"
 	"testing"
+	"time"
+
+	"github.com/northlanding/badges/internal/domain"
 )
 
 func TestLogoAssetDecodes(t *testing.T) {
@@ -195,4 +198,52 @@ func TestFitWordmarkPicksLargestScaleSatisfyingBothConstraints(t *testing.T) {
 	if want := 7; scale != want {
 		t.Errorf("fitWordmark(%d, %d) scale = %d, want %d (largest scale with 13*scale <= height)", width, height, scale, want)
 	}
+}
+
+func TestRenderPlacesLogoTopRight(t *testing.T) {
+	t.Parallel()
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := domain.Badge{
+		Registration: domain.Registration{
+			ID:          "DGS-88231",
+			Name:        "Casey Chains",
+			Email:       "casey@example.com",
+			RawPassType: "Day Pass",
+			PurchasedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, ny),
+		},
+		PassType:  domain.PassTypeDay,
+		ExpiresAt: time.Date(2026, 7, 5, 23, 59, 59, 0, ny),
+	}
+	data, err := Render(b, ny)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Panel card in the top-right region.
+	if !isWhitish(img.At(840, 70)) {
+		t.Errorf("pixel at (840,70) = %v, want the whitish card", img.At(840, 70))
+	}
+	// Background is untouched elsewhere.
+	if got := img.At(500, 500); !sameRGB(got, colorBackground) {
+		t.Errorf("pixel at (500,500) = %v, want background %v", got, colorBackground)
+	}
+	// The hairline stops at x=700, and the panel starts at x=740, so the gap
+	// between them must be plain background. Sampling inside the panel would be
+	// useless: the white card covers the hairline either way.
+	if got := img.At(720, 152); !sameRGB(got, colorBackground) {
+		t.Errorf("pixel at (720,152) = %v, want background %v (hairline not shortened)", got, colorBackground)
+	}
+}
+
+func sameRGB(got, want color.Color) bool {
+	gr, gg, gb, _ := got.RGBA()
+	wr, wg, wb, _ := want.RGBA()
+	return gr == wr && gg == wg && gb == wb
 }

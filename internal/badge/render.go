@@ -73,9 +73,10 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 
 	img := image.NewRGBA(image.Rect(0, 0, Width, Height))
 	fill(img, img.Bounds(), colorBackground)
-	// Accent bar down the left edge and a hairline under the header.
+	// Accent bar down the left edge and a hairline under the header. The
+	// hairline stops short of the logo panel on the right.
 	fill(img, image.Rect(0, 0, 18, Height), accent)
-	fill(img, image.Rect(60, 150, Width-60, 154), accent)
+	fill(img, image.Rect(60, 150, 700, 154), accent)
 
 	// Founder badges have no expiration, so the zero ExpiresAt is never formatted.
 	expiresLine := "NO EXPIRATION"
@@ -90,11 +91,16 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(b.Registration.ID, 32))
 	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing DGC. Not transferable.")
 
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode png: %w", err)
+	// Club mark in the empty right-hand region. 200px at x=740 leaves the same
+	// 60px right margin the text block uses.
+	const panelSize = 200
+	panel, err := logoPanel(panelSize)
+	if err != nil {
+		return nil, err
 	}
-	return buf.Bytes(), nil
+	draw.Draw(img, image.Rect(740, 60, 740+panelSize, 60+panelSize), panel, image.Point{}, draw.Over)
+
+	return encodePNG(img, "png")
 }
 
 // Icon renders the square club icon at the requested pixel size. Apple requires
