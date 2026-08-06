@@ -38,8 +38,13 @@ jobs:
       - name: check parser against live DiscGolfScene page
         id: check
         env:
-          DGS_EVENT_SLUG: ${{ secrets.DGS_EVENT_SLUG }}
-          DGS_SEASON_YEAR: ${{ secrets.DGS_SEASON_YEAR }}
+          # The event slug and season year are public facts about the club's
+          # tournament page, so they live in repository variables, not secrets.
+          # `secrets.X` does not fall back to `vars.X` — reading these from
+          # secrets yielded empty strings, which made cfg.Configured() false and
+          # the check skip itself while still reporting success.
+          DGS_EVENT_SLUG: ${{ vars.DGS_EVENT_SLUG }}
+          DGS_SEASON_YEAR: ${{ vars.DGS_SEASON_YEAR }}
           DGS_EMAIL: ${{ secrets.DGS_EMAIL }}
           DGS_PASSWORD: ${{ secrets.DGS_PASSWORD }}
           CLUB_TIMEZONE: America/New_York
