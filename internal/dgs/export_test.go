@@ -143,3 +143,57 @@ func TestParseExportEmptyBody(t *testing.T) {
 		t.Fatal("ParseExport on an empty body returned no error")
 	}
 }
+
+func TestParseExportReadsPDGANumber(t *testing.T) {
+	t.Parallel()
+	csv := "Division,Name,Email,PDGA#,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com,12345,11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(got))
+	}
+	if got[0].Registration.PDGANumber != "12345" {
+		t.Errorf("PDGANumber = %q, want \"12345\"", got[0].Registration.PDGANumber)
+	}
+}
+
+func TestParseExportWithoutPDGAColumn(t *testing.T) {
+	t.Parallel()
+	// A club export lacking the column must still produce badges.
+	csv := "Division,Name,Email,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com,11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	for _, err := range errs {
+		if errors.Is(err, dgs.ErrMissingColumn) {
+			t.Fatalf("a missing PDGA# column must not be ErrMissingColumn: %v", err)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(got))
+	}
+	if got[0].Registration.PDGANumber != "" {
+		t.Errorf("PDGANumber = %q, want empty", got[0].Registration.PDGANumber)
+	}
+}
+
+func TestParseExportRejectsNonNumericPDGAButKeepsTheRow(t *testing.T) {
+	t.Parallel()
+	csv := "Division,Name,Email,PDGA#,Registration date EST\n" +
+		"MEM,Casey Chains,casey@example.com,pending,11/13/2025\n"
+	got, errs := dgs.ParseExport(strings.NewReader(csv), "event-2026", 2026, time.UTC)
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1 — a bad PDGA number must not cost a badge", len(got))
+	}
+	if got[0].Registration.PDGANumber != "" {
+		t.Errorf("PDGANumber = %q, want empty for a non-numeric value", got[0].Registration.PDGANumber)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("errs = %v, want exactly one warning", errs)
+	}
+	if !strings.Contains(errs[0].Error(), "pending") {
+		t.Errorf("warning %q should name the offending value", errs[0].Error())
+	}
+}
