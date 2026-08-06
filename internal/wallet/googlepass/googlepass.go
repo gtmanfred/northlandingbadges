@@ -118,7 +118,7 @@ type genericObject struct {
 	Logo               *walletImage  `json:"logo,omitempty"`
 	HexBackgroundColor string        `json:"hexBackgroundColor"`
 	TextModulesData    []textModule  `json:"textModulesData"`
-	Barcode            barcode       `json:"barcode"`
+	Barcode            *barcode      `json:"barcode,omitempty"`
 	ValidTimeInterval  *timeInterval `json:"validTimeInterval,omitempty"`
 }
 
@@ -152,6 +152,18 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 		validInterval = &timeInterval{End: dateTime{Date: b.ExpiresAt.In(loc).Format(time.RFC3339)}}
 	}
 
+	// The QR is a member convenience pointing at their PDGA page, so a
+	// registrant with no PDGA number gets no barcode at all rather than one
+	// that resolves to nothing.
+	var bc *barcode
+	if b.Registration.HasPDGA() {
+		bc = &barcode{
+			Type:          "QR_CODE",
+			Value:         b.Registration.PDGAURL(),
+			AlternateText: "PDGA #" + strings.TrimSpace(b.Registration.PDGANumber),
+		}
+	}
+
 	obj := genericObject{
 		ID:          fmt.Sprintf("%s.%s", i.cfg.IssuerID, sanitizeID(b.Registration.ID)),
 		ClassID:     i.cfg.ClassID,
@@ -169,7 +181,7 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 			{ID: "member", Header: "Member", Body: b.Registration.Name},
 			{ID: "registration", Header: "Registration", Body: b.Registration.ID},
 		},
-		Barcode:           barcode{Type: "QR_CODE", Value: b.Registration.ID, AlternateText: b.Registration.ID},
+		Barcode:           bc,
 		ValidTimeInterval: validInterval,
 	}
 

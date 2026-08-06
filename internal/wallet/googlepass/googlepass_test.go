@@ -58,8 +58,9 @@ type parsedClaims struct {
 				ID, Header, Body string
 			} `json:"textModulesData"`
 			Barcode struct {
-				Type  string `json:"type"`
-				Value string `json:"value"`
+				Type          string `json:"type"`
+				Value         string `json:"value"`
+				AlternateText string `json:"alternateText"`
 			} `json:"barcode"`
 			Logo struct {
 				SourceURI struct {
@@ -150,8 +151,8 @@ func TestSaveJWTVerifiesAndCarriesExpiration(t *testing.T) {
 	if memberModule != b.Registration.Name {
 		t.Errorf("member module = %q, want guest name", memberModule)
 	}
-	if obj.Barcode.Value != b.Registration.ID {
-		t.Errorf("barcode value = %q, want registration id", obj.Barcode.Value)
+	if obj.Barcode.Value != "" {
+		t.Errorf("barcode value = %q, want none (testBadge has no PDGA number)", obj.Barcode.Value)
 	}
 }
 
@@ -504,5 +505,69 @@ func TestSaveJWTShowsNeverForFounderExpiry(t *testing.T) {
 	}
 	if got := obj.TextModulesData[0].Body; got != "Never" {
 		t.Errorf("expiry body = %q, want \"Never\"", got)
+	}
+}
+
+func TestSaveJWTBarcodeLinksToPDGAPage(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.Registration.PDGANumber = "12345"
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	bc := claims.Payload.GenericObjects[0].Barcode
+	if bc.Type != "QR_CODE" {
+		t.Errorf("barcode type = %q, want QR_CODE", bc.Type)
+	}
+	if bc.Value != "https://www.pdga.com/player/12345" {
+		t.Errorf("barcode value = %q, want the PDGA player URL", bc.Value)
+	}
+	if bc.AlternateText != "PDGA #12345" {
+		t.Errorf("alternateText = %q, want \"PDGA #12345\"", bc.AlternateText)
+	}
+}
+
+func TestSaveJWTOmitsBarcodeWithoutPDGANumber(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.Registration.PDGANumber = ""
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	// Raw keys: a typed struct cannot tell an absent barcode from an empty one.
+	var raw struct {
+		Payload struct {
+			GenericObjects []map[string]json.RawMessage `json:"genericObjects"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := raw.Payload.GenericObjects[0]["barcode"]; ok {
+		t.Errorf("barcode present with no PDGA number: %s", v)
 	}
 }
