@@ -56,6 +56,27 @@ const (
 	Height = 560
 )
 
+// Logo panel geometry on the badge. The text block must not run under the
+// panel: it is composited after the text, so anything beneath it disappears.
+const (
+	logoPanelSize = 200
+	logoPanelX    = 740
+	logoPanelY    = 60
+)
+
+// maxNameChars is the longest name the headline can show without running under
+// the logo panel: 60 + 7*maxNameChars*nameScale must stay below logoPanelX.
+const (
+	nameScale    = 5
+	maxNameChars = 19
+)
+
+// wordmarkGap is the horizontal space left between the logo panel and the
+// wordmark text beside it. Logo and fitWordmark must agree on this value: if
+// they drift apart the wordmark either overflows the canvas or leaves a
+// mismatched gap.
+const wordmarkGap = 6
+
 // DateLayout is how expirations are printed on artwork and in email copy.
 const DateLayout = "Mon, Jan 2 2006 at 3:04 PM MST"
 
@@ -73,9 +94,10 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 
 	img := image.NewRGBA(image.Rect(0, 0, Width, Height))
 	fill(img, img.Bounds(), colorBackground)
-	// Accent bar down the left edge and a hairline under the header.
+	// Accent bar down the left edge and a hairline under the header. The
+	// hairline stops short of the logo panel on the right.
 	fill(img, image.Rect(0, 0, 18, Height), accent)
-	fill(img, image.Rect(60, 150, Width-60, 154), accent)
+	fill(img, image.Rect(60, 150, 700, 154), accent)
 
 	// Founder badges have no expiration, so the zero ExpiresAt is never formatted.
 	expiresLine := "NO EXPIRATION"
@@ -84,17 +106,21 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 	}
 
 	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
-	drawScaled(img, 60, 200, 5, colorText, strings.ToUpper(truncate(b.Registration.Name, 22)))
+	drawScaled(img, 60, 200, nameScale, colorText, strings.ToUpper(truncate(drawable(b.Registration.Name), maxNameChars)))
 	drawScaled(img, 60, 300, 3, accent, strings.ToUpper(b.PassType.Label()))
 	drawScaled(img, 60, 380, 2, colorMuted, expiresLine)
-	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(b.Registration.ID, 32))
+	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(drawable(b.Registration.ID), 32))
 	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing DGC. Not transferable.")
 
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode png: %w", err)
+	// Club mark in the empty right-hand region. 200px at x=740 leaves the same
+	// 60px right margin the text block uses.
+	panel, err := logoPanel(logoPanelSize)
+	if err != nil {
+		return nil, err
 	}
-	return buf.Bytes(), nil
+	draw.Draw(img, image.Rect(logoPanelX, logoPanelY, logoPanelX+logoPanelSize, logoPanelY+logoPanelSize), panel, image.Point{}, draw.Over)
+
+	return encodePNG(img, "png")
 }
 
 // Icon renders the square club icon at the requested pixel size. Apple requires
@@ -105,36 +131,78 @@ func Icon(size int) ([]byte, error) {
 	}
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	fill(img, img.Bounds(), colorBackground)
-	inset := size / 8
-	fill(img, image.Rect(inset, inset, size-inset, size-inset), colorAccent)
 
-	// "NL" centred; basicfont glyphs are 7x13, so pick the largest scale that fits.
-	scale := max(1, (size-2*inset)/9)
-	textW := 2 * basicfont.Face7x13.Advance * scale
-	x := (size - textW) / 2
-	y := (size - 13*scale) / 2
-	drawScaled(img, x, y, scale, colorBackground, "NL")
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode icon: %w", err)
+	panel, err := logoPanel(size)
+	if err != nil {
+		return nil, err
 	}
-	return buf.Bytes(), nil
+	draw.Draw(img, img.Bounds(), panel, image.Point{}, draw.Over)
+
+	return encodePNG(img, "icon")
 }
 
-// Logo renders the wide wordmark used as the .pkpass logo.
+// Logo renders the wide strip used as the .pkpass logo: the club mark on its
+// white card, followed by the wordmark.
+//
+// The panel consumes height pixels of width, so the wordmark is fit to
+// whatever remains via fitWordmark rather than overflowing the canvas. At
+// 160x50 that means an abbreviated wordmark; at 320x100 it means the same
+// wordmark rendered at a larger scale, so the @2x asset looks sharper on a
+// Retina display rather than merely wider.
 func Logo(width, height int) ([]byte, error) {
 	if width < 32 || height < 12 {
 		return nil, fmt.Errorf("badge: logo %dx%d too small", width, height)
 	}
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	fill(img, img.Bounds(), colorBackground)
-	scale := max(1, height/16)
-	drawScaled(img, 4, (height-13*scale)/2, scale, colorAccent, "NORTH LANDING DGC")
 
+	panel, err := logoPanel(height)
+	if err != nil {
+		return nil, err
+	}
+	draw.Draw(img, image.Rect(0, 0, height, height), panel, image.Point{}, draw.Over)
+
+	text, scale := fitWordmark(width, height)
+	if scale == 0 {
+		// Nothing fits; the mark alone carries the strip.
+		return encodePNG(img, "logo")
+	}
+
+	drawScaled(img, height+wordmarkGap, (height-13*scale)/2, scale, colorAccent, text)
+	return encodePNG(img, "logo")
+}
+
+// fitWordmark picks the largest scale at which one of a set of candidate
+// wordmarks fits whole beside the height×height panel, preferring the longer
+// candidate at any given scale. It returns ("", 0) if nothing fits even at
+// scale 1.
+//
+// Candidates are tried longest-first so a whole shorter wordmark is preferred
+// over an ellipsised longer one: dropping "DGC" is acceptable because the club
+// mark beside the text already carries it.
+func fitWordmark(width, height int) (string, int) {
+	candidates := []string{"NORTH LANDING DGC", "NORTH LANDING"}
+	avail := width - height - wordmarkGap
+	glyph := basicfont.Face7x13.Advance
+
+	for s := max(1, height/13); s >= 1; s-- {
+		if 13*s > height {
+			continue // the line would not fit the strip's height
+		}
+		for _, c := range candidates {
+			if glyph*len(c)*s <= avail {
+				return c, s
+			}
+		}
+	}
+	return "", 0
+}
+
+// encodePNG serialises img, labelling errors with what was being encoded.
+func encodePNG(img *image.RGBA, what string) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("badge: encode logo: %w", err)
+		return nil, fmt.Errorf("badge: encode %s: %w", what, err)
 	}
 	return buf.Bytes(), nil
 }
@@ -173,15 +241,18 @@ func drawScaled(dst *image.RGBA, x, y, scale int, c color.Color, s string) {
 	draw.NearestNeighbor.Scale(dst, target, small, small.Bounds(), draw.Over, nil)
 }
 
+// truncate shortens s to at most n runes, marking elision with three ASCII
+// periods. basicfont.Face7x13 has no glyph for U+2026, so a real ellipsis
+// renders as a replacement box on the badge artwork.
 func truncate(s string, n int) string {
 	r := []rune(strings.TrimSpace(s))
 	if len(r) <= n {
 		return string(r)
 	}
-	if n <= 1 {
+	if n <= 3 {
 		return string(r[:n])
 	}
-	return string(r[:n-1]) + "…"
+	return string(r[:n-3]) + "..."
 }
 
 func max(a, b int) int {

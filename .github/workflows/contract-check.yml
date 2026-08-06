@@ -45,10 +45,6 @@ jobs:
           CLUB_TIMEZONE: America/New_York
         run: |
           set -o pipefail
-          if [ -z "${DGS_EVENT_SLUG}" ]; then
-            echo "DGS_EVENT_SLUG is not configured; cannot check the live contract." | tee output.txt
-            exit 1
-          fi
           go run ./cmd/contract-check 2>&1 | tee output.txt
 
       - name: open an issue on failure
@@ -60,12 +56,11 @@ jobs:
             let output = '(no output captured)';
             try { output = fs.readFileSync('output.txt', 'utf8'); } catch (e) {}
 
-            const title = 'DiscGolfScene parser contract check failed';
+            const title = 'Contract check failed';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const body = [
-              'The daily contract check could not extract the expected fields from the live',
-              'DiscGolfScene page. This usually means upstream markup or item labels changed,',
-              'so the polling fallback (Option B) is broken or about to be.',
+              'A daily contract check failed. The captured output below identifies which',
+              'check broke and why.',
               '',
               `Run: ${runUrl}`,
               '',

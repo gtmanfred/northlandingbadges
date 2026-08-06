@@ -21,12 +21,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/northlanding/badges/internal/badge"
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/domain"
 )
 
 // SaveURLPrefix is where a save JWT is redeemed.
 const SaveURLPrefix = "https://pay.google.com/gp/v/save/"
+
+// LogoURI is where Google fetches the club mark. Google's servers pull this over
+// HTTPS when the user saves the pass, so it must stay publicly reachable; a
+// broken URL costs the pass its logo with no error reported back to us. Derived
+// from badge.LogoAssetPath so moving the file cannot silently break rendering.
+const LogoURI = "https://raw.githubusercontent.com/gtmanfred/northlandingbadges/main/" + badge.LogoAssetPath
+
+// logoAltText is the accessibility description Google reads out for the mark.
+const logoAltText = "North Landing Disc Golf Club logo"
 
 // Issuer builds and signs save JWTs for one Google Wallet issuer account.
 type Issuer struct {
@@ -89,18 +99,28 @@ type timeInterval struct {
 	End dateTime `json:"end"`
 }
 
+type walletImage struct {
+	SourceURI          imageURI  `json:"sourceUri"`
+	ContentDescription localized `json:"contentDescription,omitempty"`
+}
+
+type imageURI struct {
+	URI string `json:"uri"`
+}
+
 type genericObject struct {
-	ID                 string       `json:"id"`
-	ClassID            string       `json:"classId"`
-	GenericType        string       `json:"genericType"`
-	State              string       `json:"state"`
-	CardTitle          localized    `json:"cardTitle"`
-	Header             localized    `json:"header"`
-	Subheader          localized    `json:"subheader"`
-	HexBackgroundColor string       `json:"hexBackgroundColor"`
-	TextModulesData    []textModule `json:"textModulesData"`
-	Barcode            barcode      `json:"barcode"`
-	ValidTimeInterval  timeInterval `json:"validTimeInterval"`
+	ID                 string        `json:"id"`
+	ClassID            string        `json:"classId"`
+	GenericType        string        `json:"genericType"`
+	State              string        `json:"state"`
+	CardTitle          localized     `json:"cardTitle"`
+	Header             localized     `json:"header"`
+	Subheader          localized     `json:"subheader"`
+	Logo               *walletImage  `json:"logo,omitempty"`
+	HexBackgroundColor string        `json:"hexBackgroundColor"`
+	TextModulesData    []textModule  `json:"textModulesData"`
+	Barcode            barcode       `json:"barcode"`
+	ValidTimeInterval  *timeInterval `json:"validTimeInterval,omitempty"`
 }
 
 type payload struct {
@@ -127,20 +147,24 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 	// Founder badges never expire: no validity interval, and the text module says
 	// so rather than showing a formatted zero time.
 	expires := "Never"
-	var validInterval timeInterval
+	var validInterval *timeInterval
 	if b.Expires() {
 		expires = b.ExpiresAt.In(loc).Format(time.RFC3339)
-		validInterval = timeInterval{End: dateTime{Date: expires}}
+		validInterval = &timeInterval{End: dateTime{Date: expires}}
 	}
 
 	obj := genericObject{
-		ID:                 fmt.Sprintf("%s.%s", i.cfg.IssuerID, sanitizeID(b.Registration.ID)),
-		ClassID:            i.cfg.ClassID,
-		GenericType:        "GENERIC_TYPE_UNSPECIFIED",
-		State:              "ACTIVE",
-		CardTitle:          text("North Landing DGC"),
-		Header:             text(b.Registration.Name),
-		Subheader:          text(b.PassType.Label()),
+		ID:          fmt.Sprintf("%s.%s", i.cfg.IssuerID, sanitizeID(b.Registration.ID)),
+		ClassID:     i.cfg.ClassID,
+		GenericType: "GENERIC_TYPE_UNSPECIFIED",
+		State:       "ACTIVE",
+		CardTitle:   text("North Landing DGC"),
+		Header:      text(b.Registration.Name),
+		Subheader:   text(b.PassType.Label()),
+		Logo: &walletImage{
+			SourceURI:          imageURI{URI: LogoURI},
+			ContentDescription: text(logoAltText),
+		},
 		HexBackgroundColor: "#0b3d2e",
 		TextModulesData: []textModule{
 			{ID: "expires", Header: "Expires", Body: expires},

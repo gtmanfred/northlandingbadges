@@ -13,3 +13,6 @@ wwdr.pem
 google-service-account*.json
 .env
 .env.*
+
+# Local scratch: never commit. Flagged as holding a credential.
+this.sh

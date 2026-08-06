@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/northlanding/badges/internal/badge"
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/domain"
 	"github.com/northlanding/badges/internal/testkeys"
@@ -60,6 +61,14 @@ type parsedClaims struct {
 				Type  string `json:"type"`
 				Value string `json:"value"`
 			} `json:"barcode"`
+			Logo struct {
+				SourceURI struct {
+					URI string `json:"uri"`
+				} `json:"sourceUri"`
+				ContentDescription struct {
+					DefaultValue struct{ Value string } `json:"defaultValue"`
+				} `json:"contentDescription"`
+			} `json:"logo"`
 			ValidTimeInterval struct {
 				End struct {
 					Date string `json:"date"`
@@ -275,5 +284,106 @@ func TestSaveJWTAllowsNonExpiringBadge(t *testing.T) {
 	}
 	if jwt == "" {
 		t.Fatal("SaveJWT returned an empty token")
+	}
+}
+
+func TestLogoURIMatchesEmbeddedAssetPath(t *testing.T) {
+	t.Parallel()
+	if !strings.HasSuffix(googlepass.LogoURI, badge.LogoAssetPath) {
+		t.Errorf("LogoURI %q does not end in the embedded asset path %q",
+			googlepass.LogoURI, badge.LogoAssetPath)
+	}
+	if !strings.HasPrefix(googlepass.LogoURI, "https://raw.githubusercontent.com/gtmanfred/northlandingbadges/main/") {
+		t.Errorf("LogoURI %q is not the expected public base", googlepass.LogoURI)
+	}
+}
+
+func TestSaveJWTCarriesLogoURI(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if len(claims.Payload.GenericObjects) != 1 {
+		t.Fatalf("got %d generic objects, want 1", len(claims.Payload.GenericObjects))
+	}
+	obj := claims.Payload.GenericObjects[0]
+	if obj.Logo.SourceURI.URI != googlepass.LogoURI {
+		t.Errorf("logo uri = %q, want %q", obj.Logo.SourceURI.URI, googlepass.LogoURI)
+	}
+	if obj.Logo.ContentDescription.DefaultValue.Value == "" {
+		t.Error("logo contentDescription is empty; alt text is required for accessibility")
+	}
+}
+
+func TestSaveJWTOmitsValidTimeIntervalForFounder(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	b := testBadge()
+	b.PassType = domain.PassTypeFounder
+	b.ExpiresAt = time.Time{}
+
+	jwt, err := issuer.SaveJWT(b, time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// Inspect the raw object: an empty date string is invalid to Google, so the
+	// key must be absent entirely rather than present-and-empty.
+	var raw struct {
+		Payload struct {
+			GenericObjects []map[string]json.RawMessage `json:"genericObjects"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if len(raw.Payload.GenericObjects) != 1 {
+		t.Fatalf("got %d generic objects, want 1", len(raw.Payload.GenericObjects))
+	}
+	if v, ok := raw.Payload.GenericObjects[0]["validTimeInterval"]; ok {
+		t.Errorf("validTimeInterval present for a founder badge: %s", v)
+	}
+}
+
+func TestSaveJWTKeepsValidTimeIntervalForExpiringBadge(t *testing.T) {
+	t.Parallel()
+	issuer, err := googlepass.NewIssuer(testConfig())
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	jwt, err := issuer.SaveJWT(testBadge(), time.UTC)
+	if err != nil {
+		t.Fatalf("SaveJWT: %v", err)
+	}
+	body, err := googlepass.Verify(jwt, issuer.PublicKey())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var claims parsedClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatalf("unmarshal claims: %v", err)
+	}
+	if got := claims.Payload.GenericObjects[0].ValidTimeInterval.End.Date; got == "" {
+		t.Error("expiring badge lost its validTimeInterval end date")
 	}
 }

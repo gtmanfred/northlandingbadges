@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/northlanding/badges/internal/config"
 	"github.com/northlanding/badges/internal/dgs"
+	"github.com/northlanding/badges/internal/wallet/googlepass"
 )
 
 func main() {
@@ -33,6 +35,28 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
+	// Each check is independent of the others, so a failure in one must not
+	// stop the rest from running: the issue this run files should describe
+	// everything that is broken today, not just the first thing found. Each
+	// check also gets its own deadline sized to its own work, rather than
+	// sharing one budget: a slow DGS export must not starve the logo check's
+	// timeout and be misreported as an unreachable logo.
+	dgsCtx, dgsCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer dgsCancel()
+
+	var errs []error
+	if err := checkDGSExport(dgsCtx, log); err != nil {
+		errs = append(errs, err)
+	}
+	if err := checkLogoURI(context.Background(), &http.Client{Timeout: 15 * time.Second}); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// checkDGSExport verifies that the DiscGolfScene club-admin CSV export still
+// carries the columns and rows the pipeline needs.
+func checkDGSExport(ctx context.Context, log *slog.Logger) error {
 	tz := os.Getenv("CLUB_TIMEZONE")
 	if tz == "" {
 		tz = config.DefaultTimezone
@@ -56,16 +80,14 @@ func run(log *slog.Logger) error {
 		Password:   os.Getenv("DGS_PASSWORD"),
 	}
 	if !cfg.Configured() {
-		return errors.New("DGS_EVENT_SLUG, DGS_SEASON_YEAR, DGS_EMAIL and DGS_PASSWORD are required")
+		log.Warn("skipping the DiscGolfScene contract check: DGS_EVENT_SLUG/DGS_SEASON_YEAR/DGS_EMAIL/DGS_PASSWORD are not configured")
+		return nil
 	}
 
 	client, err := dgs.NewExportClient(cfg, loc, log)
 	if err != nil {
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
 
 	candidates, errs := client.Fetch(ctx)
 	for _, err := range errs {
@@ -89,5 +111,35 @@ func run(log *slog.Logger) error {
 
 	log.Info("export output looks healthy",
 		"event", cfg.EventSlug, "candidates", len(candidates), "row_warnings", len(errs))
+	return nil
+}
+
+// checkLogoURI confirms Google can still fetch the club mark. A 404 here means
+// every pass saved from now on renders without a logo, and Google reports
+// nothing back to us when its fetch fails.
+//
+// It derives its own deadline from client.Timeout rather than inheriting the
+// caller's context deadline, so a slow, unrelated check (e.g. the DGS export)
+// cannot starve this one's budget and have a healthy logo misreported as
+// unreachable.
+func checkLogoURI(ctx context.Context, client *http.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, client.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, googlepass.LogoURI, nil)
+	if err != nil {
+		return fmt.Errorf("logo check: build request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("logo check: %s unreachable: %w", googlepass.LogoURI, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("logo check: %s returned %s, want 200", googlepass.LogoURI, resp.Status)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+		return fmt.Errorf("logo check: %s content-type is %q, want image/*", googlepass.LogoURI, ct)
+	}
 	return nil
 }
