@@ -152,8 +152,8 @@ curl -X POST localhost:8080/webhooks/discgolfscene \
 ## Deployment
 
 ```sh
-fly launch --no-deploy            # or: fly apps create north-landing-badges
-fly volumes create badges_data --region iad --size 1
+fly launch --no-deploy            # or: fly apps create northlandingbadges
+fly volumes create badges_data --region ord --size 1   # must match primary_region
 
 fly secrets set \
   POLL_TRIGGER_TOKEN="$(openssl rand -hex 32)" \
