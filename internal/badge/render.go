@@ -122,9 +122,11 @@ func Icon(size int) ([]byte, error) {
 // Logo renders the wide strip used as the .pkpass logo: the club mark on its
 // white card, followed by the wordmark.
 //
-// The panel consumes height pixels of width, so the wordmark is scaled down and
-// truncated to whatever remains rather than overflowing the canvas. At 160x50
-// that means an abbreviated wordmark.
+// The panel consumes height pixels of width, so the wordmark is fit to
+// whatever remains via fitWordmark rather than overflowing the canvas. At
+// 160x50 that means an abbreviated wordmark; at 320x100 it means the same
+// wordmark rendered at a larger scale, so the @2x asset looks sharper on a
+// Retina display rather than merely wider.
 func Logo(width, height int) ([]byte, error) {
 	if width < 32 || height < 12 {
 		return nil, fmt.Errorf("badge: logo %dx%d too small", width, height)
@@ -139,24 +141,41 @@ func Logo(width, height int) ([]byte, error) {
 	draw.Draw(img, image.Rect(0, 0, height, height), panel, image.Point{}, draw.Over)
 
 	const gap = 6
-	text := "NORTH LANDING DGC"
-	avail := width - height - gap
-	glyph := basicfont.Face7x13.Advance
-
-	scale := max(1, height/16)
-	for scale > 1 && glyph*len(text)*scale > avail {
-		scale--
-	}
-	if maxChars := avail / (glyph * scale); maxChars < len(text) {
-		if maxChars < 1 {
-			// No room for a wordmark at all; the mark alone carries the strip.
-			return encodePNG(img, "logo")
-		}
-		text = truncate(text, maxChars)
+	text, scale := fitWordmark(width, height)
+	if scale == 0 {
+		// Nothing fits; the mark alone carries the strip.
+		return encodePNG(img, "logo")
 	}
 
 	drawScaled(img, height+gap, (height-13*scale)/2, scale, colorAccent, text)
 	return encodePNG(img, "logo")
+}
+
+// fitWordmark picks the largest scale at which one of a set of candidate
+// wordmarks fits whole beside the height×height panel, preferring the longer
+// candidate at any given scale. It returns ("", 0) if nothing fits even at
+// scale 1.
+//
+// Candidates are tried longest-first so a whole shorter wordmark is preferred
+// over an ellipsised longer one: dropping "DGC" is acceptable because the club
+// mark beside the text already carries it.
+func fitWordmark(width, height int) (string, int) {
+	const gap = 6
+	candidates := []string{"NORTH LANDING DGC", "NORTH LANDING"}
+	avail := width - height - gap
+	glyph := basicfont.Face7x13.Advance
+
+	for s := max(1, height/16); s >= 1; s-- {
+		if 13*s > height {
+			continue // the line would not fit the strip's height
+		}
+		for _, c := range candidates {
+			if glyph*len(c)*s <= avail {
+				return c, s
+			}
+		}
+	}
+	return "", 0
 }
 
 // encodePNG serialises img, labelling errors with what was being encoded.

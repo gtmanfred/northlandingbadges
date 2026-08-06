@@ -168,3 +168,17 @@ func TestLogoFitsWordmarkInNarrowStrip(t *testing.T) {
 		t.Errorf("pixel inside the panel = %v, want whitish card", img.At(25, 4))
 	}
 }
+
+func TestLogoWordmarkScalesUpForRetinaStrip(t *testing.T) {
+	t.Parallel()
+	// logo@2x.png (320x100) has more than double the available width of
+	// logo.png (160x50) once the panel is subtracted. The chosen scale must
+	// reflect that: a fit loop that only ever steps scale *down* would settle
+	// on the same scale for both, and the @2x asset would render at half its
+	// intended size on a Retina display.
+	_, scale1x := fitWordmark(160, 50)
+	_, scale2x := fitWordmark(320, 100)
+	if scale2x <= scale1x {
+		t.Errorf("2x scale = %d, want strictly greater than 1x scale = %d", scale2x, scale1x)
+	}
+}
