@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /tasks/poll", s.handlePoll)
 	mux.HandleFunc("POST /webhooks/discgolfscene", s.handleWebhook)
 	mux.HandleFunc("GET /passes/{id}", s.handlePassDownload)
+	mux.HandleFunc("GET /admin/processed", s.handleAdminListProcessed)
+	mux.HandleFunc("DELETE /admin/processed/{id}", s.handleAdminDeleteProcessed)
 	return mux
 }
 
@@ -233,6 +236,117 @@ func (s *Server) handlePassDownload(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(artifact.PKPass); err != nil {
 		s.log.Error("pass download write failed", "registration_id", id, "error", err)
 	}
+}
+
+// ProcessedRegistration is one row of the admin ledger listing. Times are
+// RFC3339, and empty when unset — a founder badge has no expiry.
+type ProcessedRegistration struct {
+	RegistrationID string `json:"registration_id"`
+	Email          string `json:"email"`
+	PassType       string `json:"pass_type"`
+	ExpiresAt      string `json:"expires_at"`
+	EmailMode      string `json:"email_mode"`
+	Action         string `json:"action"`
+	ProcessedAt    string `json:"processed_at"`
+}
+
+// ProcessedListResponse is the GET /admin/processed body.
+type ProcessedListResponse struct {
+	Count         int                     `json:"count"`
+	Year          int                     `json:"year,omitempty"`
+	Registrations []ProcessedRegistration `json:"registrations"`
+}
+
+// handleAdminListProcessed lists the registrations already handled, so an admin
+// can answer "did this member get their badge?" without shelling into the volume.
+//
+// The optional ?year= filter matches the badge's expiry year, which is the
+// season a season pass or day pass belongs to. Founder badges never expire and
+// are therefore only visible in the unfiltered listing.
+func (s *Server) handleAdminListProcessed(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(w, r) {
+		return
+	}
+	if s.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ledger unavailable"})
+		return
+	}
+
+	var filter store.ListFilter
+	if raw := strings.TrimSpace(r.URL.Query().Get("year")); raw != "" {
+		year, err := strconv.Atoi(raw)
+		if err != nil || year <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("year %q is not a calendar year", raw)})
+			return
+		}
+		filter.Year = year
+	}
+
+	records, err := s.store.ListProcessed(r.Context(), filter)
+	if err != nil {
+		s.log.Error("admin list processed failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read ledger"})
+		return
+	}
+
+	resp := ProcessedListResponse{
+		Count:         len(records),
+		Year:          filter.Year,
+		Registrations: make([]ProcessedRegistration, 0, len(records)),
+	}
+	for _, rec := range records {
+		resp.Registrations = append(resp.Registrations, ProcessedRegistration{
+			RegistrationID: rec.RegistrationID,
+			Email:          rec.Email,
+			PassType:       rec.PassType,
+			ExpiresAt:      formatTime(rec.ExpiresAt),
+			EmailMode:      rec.EmailMode,
+			Action:         rec.Action,
+			ProcessedAt:    formatTime(rec.ProcessedAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleAdminDeleteProcessed forgets a registration and its stored passes.
+//
+// This is the re-issue lever: dedupe (spec §4) is what stops a badge being
+// mailed twice, so deleting the row is the only way to deliberately mail it
+// again on the next cycle. Any emailed wallet link for the registration stops
+// working immediately.
+func (s *Server) handleAdminDeleteProcessed(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(w, r) {
+		return
+	}
+	if s.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ledger unavailable"})
+		return
+	}
+
+	id := r.PathValue("id")
+	err := s.store.DeleteProcessed(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "registration not found"})
+		return
+	}
+	if err != nil {
+		s.log.Error("admin delete failed", "registration_id", id, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot delete registration"})
+		return
+	}
+	s.log.Info("admin deleted processed registration", "registration_id", id, "remote", r.RemoteAddr)
+	writeJSON(w, http.StatusOK, map[string]any{"registration_id": id, "deleted": true})
+}
+
+// authorizeAdmin gates the /admin endpoints, writing the 401 itself so handlers
+// can return on false.
+func (s *Server) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if s.authorized(r, s.cfg.AdminSecret()) {
+		return true
+	}
+	s.log.Warn("admin request rejected", "path", r.URL.Path, "remote", r.RemoteAddr)
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	return false
 }
 
 // authorized accepts the shared secret as a bearer token or an X-Poll-Token

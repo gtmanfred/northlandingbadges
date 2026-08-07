@@ -18,7 +18,7 @@ func TestClassifyPassType(t *testing.T) {
 		{raw: "Day Pass", want: domain.PassTypeDay},
 		{raw: "  day   pass  ", want: domain.PassTypeDay},
 		{raw: "DAYPASS", want: domain.PassTypeDay},
-		{raw: "North Landing DGC - Day Pass ($5)", want: domain.PassTypeDay},
+		{raw: "North Landing Community - Day Pass ($5)", want: domain.PassTypeDay},
 		{raw: "Season Membership", want: domain.PassTypeSeason},
 		{raw: "2026 Season Membership - $50", want: domain.PassTypeSeason},
 		{raw: "annual membership", want: domain.PassTypeSeason},

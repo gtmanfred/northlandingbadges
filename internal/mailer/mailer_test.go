@@ -79,7 +79,7 @@ func newMailer(t *testing.T, mode config.EmailMode, allowlist []string, redirect
 	if err != nil {
 		t.Fatalf("NewGuard: %v", err)
 	}
-	return mailer.New(g, tr, mail.Address{Name: "North Landing DGC", Address: "club@gmail.com"}, quietLogger())
+	return mailer.New(g, tr, mail.Address{Name: "North Landing Community", Address: "club@gmail.com"}, quietLogger())
 }
 
 func TestDeliverLiveModeSends(t *testing.T) {
@@ -237,7 +237,7 @@ func TestSMTPTransportSendsOverRealSocket(t *testing.T) {
 
 	tr := mailer.SMTPTransport{Addr: srv.Addr(), Username: "club@gmail.com", Password: "app-password"}
 	m := mailer.New(mustGuard(t, config.ModeLive), tr,
-		mail.Address{Name: "North Landing DGC", Address: "club@gmail.com"}, quietLogger())
+		mail.Address{Name: "North Landing Community", Address: "club@gmail.com"}, quietLogger())
 
 	if _, err := m.Deliver(context.Background(), "DGS-1", testData()); err != nil {
 		t.Fatalf("Deliver: %v", err)

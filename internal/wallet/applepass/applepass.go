@@ -28,7 +28,7 @@ import (
 )
 
 // Description is the accessibility description Apple requires in pass.json.
-const Description = "North Landing DGC membership badge"
+const Description = "North Landing Community membership badge"
 
 // Signer turns badges into signed .pkpass bundles.
 type Signer struct {
@@ -178,7 +178,7 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 		Description:        Description,
 		SerialNumber:       b.Registration.ID,
 		ExpirationDate:     expirationDate,
-		LogoText:           "North Landing DGC",
+		LogoText:           "North Landing Community",
 		ForegroundColor:    "rgb(255,255,255)",
 		BackgroundColor:    "rgb(11,61,46)",
 		LabelColor:         "rgb(232,180,58)",

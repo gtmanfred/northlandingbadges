@@ -112,12 +112,12 @@ func newHarness(t *testing.T, mode config.EmailMode, allowlist []string, redirec
 		t.Fatalf("NewGuard: %v", err)
 	}
 	tr := &recordingTransport{}
-	m := mailer.New(guard, tr, mail.Address{Name: "North Landing DGC", Address: "club@gmail.com"}, quietLogger())
+	m := mailer.New(guard, tr, mail.Address{Name: "North Landing Community", Address: "club@gmail.com"}, quietLogger())
 
 	signer, err := applepass.NewSigner(config.AppleConfig{
 		PassTypeIdentifier: "pass.com.northlanding.badge",
 		TeamIdentifier:     "TESTTEAM01",
-		OrganizationName:   "North Landing DGC",
+		OrganizationName:   "North Landing Community",
 		CertPEM:            testkeys.ApplePassCertPEM(),
 		KeyPEM:             testkeys.ApplePassKeyPEM(),
 		WWDRPEM:            testkeys.AppleWWDRPEM(),

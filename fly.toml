@@ -19,7 +19,7 @@ primary_region = "ord"
   CLUB_TIMEZONE = "America/New_York"
   BASE_URL = "https://northlandingbadges.fly.dev"
   SMTP_ADDR = "smtp.gmail.com:587"
-  EMAIL_FROM_NAME = "North Landing DGC"
+  EMAIL_FROM_NAME = "North Landing Community"
   # EMAIL_MODE is deliberately not set here: unset means live (spec §4). Set it
   # with `fly secrets set EMAIL_MODE=allowlist` only during acceptance testing.
 

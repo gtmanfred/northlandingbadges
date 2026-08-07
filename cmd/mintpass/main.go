@@ -127,7 +127,7 @@ func appleConfig(useTest bool) (config.AppleConfig, error) {
 		return config.AppleConfig{
 			PassTypeIdentifier: envOr("APPLE_PASS_TYPE_ID", "pass.com.northlanding.badge"),
 			TeamIdentifier:     envOr("APPLE_TEAM_ID", "TESTTEAM01"),
-			OrganizationName:   envOr("APPLE_ORG_NAME", "North Landing DGC"),
+			OrganizationName:   envOr("APPLE_ORG_NAME", "North Landing Community"),
 			CertPEM:            testkeys.ApplePassCertPEM(),
 			KeyPEM:             testkeys.ApplePassKeyPEM(),
 			WWDRPEM:            testkeys.AppleWWDRPEM(),
@@ -137,7 +137,7 @@ func appleConfig(useTest bool) (config.AppleConfig, error) {
 	cfg := config.AppleConfig{
 		PassTypeIdentifier: os.Getenv("APPLE_PASS_TYPE_ID"),
 		TeamIdentifier:     os.Getenv("APPLE_TEAM_ID"),
-		OrganizationName:   envOr("APPLE_ORG_NAME", "North Landing DGC"),
+		OrganizationName:   envOr("APPLE_ORG_NAME", "North Landing Community"),
 		CertPEM:            os.Getenv("APPLE_CERT_PEM"),
 		KeyPEM:             os.Getenv("APPLE_KEY_PEM"),
 		WWDRPEM:            os.Getenv("APPLE_WWDR_PEM"),
