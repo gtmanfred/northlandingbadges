@@ -216,8 +216,59 @@ func TestPassJSONCarriesSpecFields(t *testing.T) {
 	if len(p.Generic.PrimaryFields) != 1 || p.Generic.PrimaryFields[0].Value != b.Registration.Name {
 		t.Errorf("primaryFields = %+v, want guest name", p.Generic.PrimaryFields)
 	}
-	if len(p.Generic.SecondaryFields) != 1 || p.Generic.SecondaryFields[0].Value != "Season Member" {
-		t.Errorf("secondaryFields = %+v, want pass type", p.Generic.SecondaryFields)
+	if len(p.Generic.SecondaryFields) != 2 || p.Generic.SecondaryFields[0].Value != "Season Member" {
+		t.Errorf("secondaryFields = %+v, want pass type then expiry", p.Generic.SecondaryFields)
+	}
+}
+
+// Wallet renders an expiry placed in auxiliaryFields nowhere on the front of a
+// generic pass — verified against a real device — so the field has to sit in
+// secondaryFields next to the pass type. Guard the placement, not just the value.
+func TestExpirationRendersInSecondaryFields(t *testing.T) {
+	t.Parallel()
+	signer, err := applepass.NewSigner(testConfig())
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	b := testBadge()
+
+	raw, err := signer.PassJSON(b, ny)
+	if err != nil {
+		t.Fatalf("PassJSON: %v", err)
+	}
+	var p struct {
+		Generic struct {
+			SecondaryFields []struct {
+				Key, Label, Value, DateStyle string
+			} `json:"secondaryFields"`
+			AuxiliaryFields []struct{ Key string } `json:"auxiliaryFields"`
+		} `json:"generic"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(p.Generic.AuxiliaryFields) != 0 {
+		t.Errorf("auxiliaryFields = %+v, want none: Wallet does not render them here", p.Generic.AuxiliaryFields)
+	}
+
+	var expires *struct {
+		Key, Label, Value, DateStyle string
+	}
+	for i := range p.Generic.SecondaryFields {
+		if p.Generic.SecondaryFields[i].Key == "expires" {
+			expires = &p.Generic.SecondaryFields[i]
+		}
+	}
+	if expires == nil {
+		t.Fatalf("no expires field in secondaryFields = %+v", p.Generic.SecondaryFields)
+	}
+	if want := b.ExpiresAt.In(ny).Format(time.RFC3339); expires.Value != want {
+		t.Errorf("expires value = %q, want %q", expires.Value, want)
+	}
+	if expires.DateStyle == "" {
+		t.Error("expires field lost its dateStyle, so Wallet will not localize the date")
 	}
 }
 
