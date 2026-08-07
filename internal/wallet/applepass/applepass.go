@@ -187,10 +187,13 @@ func (s *Signer) passJSON(b domain.Badge, loc *time.Location) ([]byte, error) {
 			PrimaryFields: []field{
 				{Key: "guest", Label: "GUEST", Value: b.Registration.Name},
 			},
+			// Expiry sits here rather than in auxiliaryFields: Wallet renders no
+			// auxiliary row on the front of a generic pass, so an expiry placed
+			// there is silently invisible. Verified on a real device.
 			SecondaryFields: []field{
 				{Key: "passType", Label: "PASS TYPE", Value: b.PassType.Label()},
+				expiresField,
 			},
-			AuxiliaryFields: []field{expiresField},
 			BackFields: []field{
 				{Key: "registration", Label: "REGISTRATION", Value: b.Registration.ID},
 				{Key: "terms", Label: "TERMS", Value: terms},

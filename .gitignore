@@ -16,3 +16,11 @@ google-service-account*.json
 
 # Local scratch: never commit. Flagged as holding a credential.
 this.sh
+
+# Apple Wallet signing material and locally minted passes. Rooted so the
+# throwaway certificates under internal/testkeys stay tracked.
+/*.cer
+/*.csr
+/*.pem
+/*.p12
+/*.pkpass

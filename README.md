@@ -207,6 +207,18 @@ Test keys in `internal/testkeys/` are self-signed throwaways so CI can verify
 signing with no secrets. They are not Apple or Google credentials and no device
 will trust them.
 
+To check real Apple credentials on a device without deploying or mailing anyone,
+`cmd/mintpass` writes one signed `.pkpass` to disk:
+
+```sh
+set -a; . ./.env; set +a          # APPLE_* material, never committed
+go run ./cmd/mintpass -name "Test Member" -email you@example.com -pdga 123456
+```
+
+AirDrop the result to an iPhone. `-testkeys` signs with the throwaway certs
+instead, which is enough to inspect layout but produces a pass iOS refuses to
+add. Other flags: `-type`, `-year`, `-slug`, `-out`, `-print-json`.
+
 ### Google Wallet class template
 
 The card layout — which `textModulesData` rows show on the pass FACE, versus
