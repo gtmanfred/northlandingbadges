@@ -36,7 +36,7 @@ const SaveURLPrefix = "https://pay.google.com/gp/v/save/"
 const LogoURI = "https://raw.githubusercontent.com/gtmanfred/northlandingbadges/main/" + badge.LogoAssetPath
 
 // logoAltText is the accessibility description Google reads out for the mark.
-const logoAltText = "North Landing Disc Golf Club logo"
+const logoAltText = "North Landing Community logo"
 
 // Issuer builds and signs save JWTs for one Google Wallet issuer account.
 type Issuer struct {
