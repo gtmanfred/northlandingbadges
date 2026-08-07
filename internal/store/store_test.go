@@ -348,3 +348,133 @@ func TestFounderIssuedBlankEmail(t *testing.T) {
 		t.Error("FounderIssued(blank) = true, want false: a blank email can never be deduped")
 	}
 }
+
+func TestListProcessedReturnsNewestFirst(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openTemp(t)
+
+	seed(t, s, store.Record{
+		RegistrationID: "reg-old",
+		Email:          "old@example.com",
+		PassType:       "season_membership",
+		ExpiresAt:      time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+		Action:         "sent",
+		ProcessedAt:    time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC),
+	})
+	seed(t, s, store.Record{
+		RegistrationID: "reg-new",
+		Email:          "new@example.com",
+		PassType:       "season_membership",
+		ExpiresAt:      time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+		Action:         "sent",
+		ProcessedAt:    time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+	})
+
+	got, err := s.ListProcessed(ctx, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListProcessed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].RegistrationID != "reg-new" || got[1].RegistrationID != "reg-old" {
+		t.Errorf("order = %s,%s, want reg-new,reg-old", got[0].RegistrationID, got[1].RegistrationID)
+	}
+	if got[0].Email != "new@example.com" {
+		t.Errorf("Email = %q, want new@example.com", got[0].Email)
+	}
+	if !got[0].ExpiresAt.Equal(time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)) {
+		t.Errorf("ExpiresAt = %v, want 2026-12-31T23:59:59Z", got[0].ExpiresAt)
+	}
+}
+
+func TestListProcessedFiltersByExpiryYear(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openTemp(t)
+
+	seed(t, s, store.Record{
+		RegistrationID: "reg-2025",
+		Email:          "a@example.com",
+		ExpiresAt:      time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+		Action:         "sent",
+		ProcessedAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	seed(t, s, store.Record{
+		RegistrationID: "reg-2026",
+		Email:          "b@example.com",
+		ExpiresAt:      time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+		Action:         "sent",
+		ProcessedAt:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	// Founder badges never expire, so they must not answer to any year filter.
+	seed(t, s, store.Record{
+		RegistrationID: "reg-founder",
+		Email:          "c@example.com",
+		PassType:       "founder",
+		Action:         "sent",
+		ProcessedAt:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+
+	got, err := s.ListProcessed(ctx, store.ListFilter{Year: 2026})
+	if err != nil {
+		t.Fatalf("ListProcessed: %v", err)
+	}
+	if len(got) != 1 || got[0].RegistrationID != "reg-2026" {
+		t.Fatalf("got %v, want only reg-2026", ids(got))
+	}
+}
+
+func TestDeleteProcessedRemovesRowAndArtifact(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openTemp(t)
+
+	seed(t, s, store.Record{RegistrationID: "reg-1", Email: "a@example.com", Action: "sent", ProcessedAt: time.Now()})
+	if err := s.SaveArtifact(ctx, store.Artifact{RegistrationID: "reg-1", AccessToken: "tok"}); err != nil {
+		t.Fatalf("SaveArtifact: %v", err)
+	}
+
+	if err := s.DeleteProcessed(ctx, "reg-1"); err != nil {
+		t.Fatalf("DeleteProcessed: %v", err)
+	}
+
+	processed, err := s.Processed(ctx, "reg-1")
+	if err != nil {
+		t.Fatalf("Processed: %v", err)
+	}
+	if processed {
+		t.Error("row still present after DeleteProcessed")
+	}
+	if _, err := s.Artifact(ctx, "reg-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("Artifact err = %v, want ErrNotFound: the pass must not outlive the ledger row", err)
+	}
+}
+
+func TestDeleteProcessedUnknownIDIsNotFound(t *testing.T) {
+	t.Parallel()
+	s, _ := openTemp(t)
+	if err := s.DeleteProcessed(context.Background(), "nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("DeleteProcessed(unknown) = %v, want ErrNotFound", err)
+	}
+}
+
+func seed(t *testing.T, s *store.Store, r store.Record) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.Claim(ctx, r.RegistrationID); err != nil {
+		t.Fatalf("Claim %s: %v", r.RegistrationID, err)
+	}
+	if err := s.MarkProcessed(ctx, r); err != nil {
+		t.Fatalf("MarkProcessed %s: %v", r.RegistrationID, err)
+	}
+}
+
+func ids(rs []store.Record) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.RegistrationID
+	}
+	return out
+}

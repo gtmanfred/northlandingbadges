@@ -27,7 +27,7 @@ const (
 // DefaultSMTPAddr is Gmail's submission endpoint (STARTTLS).
 const DefaultSMTPAddr = "smtp.gmail.com:587"
 
-// DefaultTimezone is North Landing DGC's local timezone; all expiration wall
+// DefaultTimezone is North Landing Community's local timezone; all expiration wall
 // clocks are computed in it.
 const DefaultTimezone = "America/New_York"
 
@@ -39,6 +39,7 @@ type Config struct {
 
 	PollTriggerToken string
 	WebhookSecret    string
+	AdminToken       string
 
 	EmailMode  EmailMode
 	Allowlist  []string
@@ -152,13 +153,14 @@ func Load(getenv Getenv) (*Config, error) {
 		BaseURL:          strings.TrimSuffix(get("BASE_URL", "http://localhost:8080"), "/"),
 		PollTriggerToken: get("POLL_TRIGGER_TOKEN", ""),
 		WebhookSecret:    get("DGS_WEBHOOK_SECRET", ""),
+		AdminToken:       get("ADMIN_TOKEN", ""),
 		EmailMode:        EmailMode(strings.ToLower(get("EMAIL_MODE", string(ModeLive)))),
 		Allowlist:        ParseAllowlist(getenv("EMAIL_ALLOWLIST")),
 		RedirectTo:       NormalizeAddress(getenv("EMAIL_REDIRECT_TO")),
 		GmailUser:        get("GMAIL_USER", ""),
 		GmailAppPassword: getenv("GMAIL_APP_PASSWORD"),
 		SMTPAddr:         get("SMTP_ADDR", DefaultSMTPAddr),
-		FromName:         get("EMAIL_FROM_NAME", "North Landing DGC"),
+		FromName:         get("EMAIL_FROM_NAME", "North Landing Community"),
 		DGS: DGSConfig{
 			BaseURL:    get("DGS_BASE_URL", DefaultDGSBaseURL),
 			EventSlug:  get("DGS_EVENT_SLUG", ""),
@@ -169,7 +171,7 @@ func Load(getenv Getenv) (*Config, error) {
 		Apple: AppleConfig{
 			PassTypeIdentifier: get("APPLE_PASS_TYPE_ID", ""),
 			TeamIdentifier:     get("APPLE_TEAM_ID", ""),
-			OrganizationName:   get("APPLE_ORG_NAME", "North Landing DGC"),
+			OrganizationName:   get("APPLE_ORG_NAME", "North Landing Community"),
 			CertPEM:            getenv("APPLE_CERT_PEM"),
 			KeyPEM:             getenv("APPLE_KEY_PEM"),
 			KeyPassword:        getenv("APPLE_KEY_PASSWORD"),
@@ -207,6 +209,17 @@ func Load(getenv Getenv) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// AdminSecret is the shared secret guarding the /admin endpoints. It falls back
+// to the poll token — which validation already requires — so the endpoints are
+// never unauthenticated, while ADMIN_TOKEN lets an operator hand out read/delete
+// access without also handing out the scheduler's trigger.
+func (c *Config) AdminSecret() string {
+	if c.AdminToken != "" {
+		return c.AdminToken
+	}
+	return c.PollTriggerToken
 }
 
 // SendsMail reports whether the configured mode can produce an SMTP send.

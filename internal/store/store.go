@@ -326,6 +326,83 @@ func (s *Store) Artifact(ctx context.Context, registrationID string) (Artifact, 
 	return a, nil
 }
 
+// ListFilter narrows ListProcessed. The zero value matches every row.
+type ListFilter struct {
+	// Year, when non-zero, keeps only records whose badge expires in that
+	// calendar year. Non-expiring badges (founder) never match a year filter.
+	Year int
+}
+
+// ListProcessed returns the ledger, newest first, subject to filter.
+//
+// This is the admin read model: the registration ID is opaque to a human, so the
+// email address travels with every row.
+func (s *Store) ListProcessed(ctx context.Context, filter ListFilter) ([]Record, error) {
+	query := `SELECT registration_id, email, pass_type, expires_at, email_mode, action, processed_at
+	            FROM processed_registrations`
+	var args []any
+	if filter.Year != 0 {
+		// expires_at is stored as RFC3339, so the year is the first four
+		// characters. A blank expiry (founder badges) cannot match.
+		query += ` WHERE substr(expires_at, 1, 4) = ?`
+		args = append(args, fmt.Sprintf("%04d", filter.Year))
+	}
+	// registration_id breaks ties so the order is stable across calls.
+	query += ` ORDER BY processed_at DESC, registration_id ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list processed: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Record
+	for rows.Next() {
+		var (
+			r         Record
+			expiresAt string
+			processed string
+		)
+		if err := rows.Scan(&r.RegistrationID, &r.Email, &r.PassType, &expiresAt, &r.EmailMode, &r.Action, &processed); err != nil {
+			return nil, fmt.Errorf("store: list processed: %w", err)
+		}
+		r.ExpiresAt = parseTime(expiresAt)
+		r.ProcessedAt = parseTime(processed)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list processed: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteProcessed forgets a registration, dropping its wallet artifact too, and
+// reports ErrNotFound when there was nothing to delete.
+//
+// Unlike Release — which retracts a failed in-flight claim — this is the admin's
+// deliberate re-issue lever: the next poll cycle will treat the registration as
+// new and mail the badge again.
+func (s *Store) DeleteProcessed(ctx context.Context, registrationID string) error {
+	if registrationID == "" {
+		return errors.New("store: empty registration id")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM pass_artifacts WHERE registration_id = ?`, registrationID); err != nil {
+		return fmt.Errorf("store: delete artifact %s: %w", registrationID, err)
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM processed_registrations WHERE registration_id = ?`, registrationID)
+	if err != nil {
+		return fmt.Errorf("store: delete processed %s: %w", registrationID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete processed %s: %w", registrationID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: delete processed %s: %w", registrationID, ErrNotFound)
+	}
+	return nil
+}
+
 // CountProcessed returns how many registrations are on record; used by /healthz.
 func (s *Store) CountProcessed(ctx context.Context) (int, error) {
 	var n int

@@ -1,7 +1,7 @@
 # Spec: North Landing Badge Distribution System
 
 ## 1. Context & Goal
-North Landing DGC manages its club, season memberships, and day passes via [North Landing DGC](https://www.discgolfscene.com/club/7500/north-landing-dgc). Because physical badge distribution at the on-site shop will no longer be possible next year, this application automates digital badge delivery. 
+North Landing Community manages its club, season memberships, and day passes via [DiscGolfScene](https://www.discgolfscene.com/club/7500/north-landing-dgc). Because physical badge distribution at the on-site shop will no longer be possible next year, this application automates digital badge delivery. 
 
 The goal is to intercept registration events, generate a custom digital badge, and email it directly to the user with embedded Apple Wallet (`.pkpass`) and Google Wallet pass links reflecting their correct expiration details.
 
@@ -82,6 +82,14 @@ Rules:
 * Every guarded decision is logged with the registration ID, intended recipient, mode, and action taken (`sent`, `skipped`, `redirected`, `dry_run`).
 * `EMAIL_MODE` defaults to `live` when unset, so a production deploy that omits these variables behaves normally.
 
+### Admin Ledger Endpoints
+The dedupe ledger is the only record of who was mailed, and §2 rules out a UI, so two authenticated JSON endpoints expose it:
+
+* `GET /admin/processed` — lists processed registrations (registration ID, email, pass type, expiry, email mode, action, processed timestamp), newest first. `?year=YYYY` narrows the list to badges expiring in that calendar year, which is the season a season pass or day pass belongs to; founder badges never expire and so appear only in the unfiltered listing. A non-numeric or non-positive year is a `400`.
+* `DELETE /admin/processed/{id}` — deletes the ledger row and its stored wallet artifacts, returning `404` when the ID is unknown. This is the counterpart to the guard rule above: clearing the dedupe row is the deliberate way to re-issue a badge, and it revokes any emailed pass link for that registration. Deletions are logged with the registration ID.
+
+Both are guarded by `ADMIN_TOKEN`, presented as a bearer token or `X-Poll-Token`, compared in constant time. When `ADMIN_TOKEN` is unset the endpoints fall back to `POLL_TRIGGER_TOKEN` — which startup already requires — so they are never unauthenticated; setting it separates ledger access from the scheduler's trigger.
+
 ## 5. Data Contracts & Wallet Schema
 ### Pass Fields Required:
 * `passTypeIdentifier` / `Template ID`: North Landing Badge
@@ -105,6 +113,7 @@ Development follows TDD: a failing test lands before the implementation that sat
 **Integration** — real SQLite file and real HTTP server, fakes only at the true external edges (SMTP, DiscGolfScene, Apple/Google signing).
 * Dedupe: replaying the same registration ID twice sends exactly one email. Concurrent duplicate deliveries produce one send.
 * `POST /tasks/poll` — valid `POLL_TRIGGER_TOKEN` runs a cycle; missing/wrong token returns `401` and does no work.
+* `/admin/processed` — listing returns the stored emails and honours the `year` filter; delete removes the row, revokes the pass download, and returns `404` for an unknown ID; missing/wrong token returns `401` and leaves the ledger untouched.
 * Poll cycle end-to-end against a recorded DiscGolfScene fixture: ingest → classify → generate → guard → send, asserted against an in-process SMTP capture server rather than a mock, so the wire format is exercised.
 * SQLite schema migrations apply cleanly to both an empty volume and a populated one.
 

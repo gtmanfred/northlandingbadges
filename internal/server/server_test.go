@@ -447,3 +447,221 @@ func TestNewValidatesOptions(t *testing.T) {
 		t.Error("expected error without runner")
 	}
 }
+
+// seedProcessed writes a finalized ledger row for the admin endpoint tests.
+func seedProcessed(t *testing.T, st *store.Store, r store.Record) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.Claim(ctx, r.RegistrationID); err != nil {
+		t.Fatalf("Claim %s: %v", r.RegistrationID, err)
+	}
+	if err := st.MarkProcessed(ctx, r); err != nil {
+		t.Fatalf("MarkProcessed %s: %v", r.RegistrationID, err)
+	}
+}
+
+func adminRequest(method, target, token string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req
+}
+
+type adminListResponse struct {
+	Count         int `json:"count"`
+	Registrations []struct {
+		RegistrationID string `json:"registration_id"`
+		Email          string `json:"email"`
+		PassType       string `json:"pass_type"`
+		ExpiresAt      string `json:"expires_at"`
+		Action         string `json:"action"`
+		ProcessedAt    string `json:"processed_at"`
+	} `json:"registrations"`
+}
+
+func TestAdminListProcessedReturnsEmails(t *testing.T) {
+	t.Parallel()
+	st := openStore(t)
+	seedProcessed(t, st, store.Record{
+		RegistrationID: "reg-1",
+		Email:          "member@example.com",
+		PassType:       "season_membership",
+		ExpiresAt:      time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+		EmailMode:      "live",
+		Action:         "sent",
+		ProcessedAt:    time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+	})
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, st)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodGet, "/admin/processed", "poll-secret"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: body %s", rec.Code, rec.Body.String())
+	}
+	var body adminListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Count != 1 || len(body.Registrations) != 1 {
+		t.Fatalf("count = %d, registrations = %d, want 1,1", body.Count, len(body.Registrations))
+	}
+	got := body.Registrations[0]
+	if got.Email != "member@example.com" {
+		t.Errorf("email = %q", got.Email)
+	}
+	if got.RegistrationID != "reg-1" || got.PassType != "season_membership" || got.Action != "sent" {
+		t.Errorf("row = %+v", got)
+	}
+	if got.ExpiresAt != "2026-12-31T23:59:59Z" {
+		t.Errorf("expires_at = %q", got.ExpiresAt)
+	}
+}
+
+func TestAdminListProcessedFiltersByYear(t *testing.T) {
+	t.Parallel()
+	st := openStore(t)
+	seedProcessed(t, st, store.Record{
+		RegistrationID: "reg-2025", Email: "a@example.com", Action: "sent",
+		ExpiresAt:   time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+		ProcessedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	seedProcessed(t, st, store.Record{
+		RegistrationID: "reg-2026", Email: "b@example.com", Action: "sent",
+		ExpiresAt:   time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+		ProcessedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, st)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodGet, "/admin/processed?year=2026", "poll-secret"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body adminListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Count != 1 || body.Registrations[0].RegistrationID != "reg-2026" {
+		t.Fatalf("body = %+v, want only reg-2026", body)
+	}
+}
+
+func TestAdminListProcessedRejectsBadYear(t *testing.T) {
+	t.Parallel()
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, openStore(t))
+	for _, year := range []string{"nineteen", "0", "-5"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, adminRequest(http.MethodGet, "/admin/processed?year="+year, "poll-secret"))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("year=%s: status = %d, want 400", year, rec.Code)
+		}
+	}
+}
+
+func TestAdminEndpointsRejectMissingAndWrongToken(t *testing.T) {
+	t.Parallel()
+	st := openStore(t)
+	seedProcessed(t, st, store.Record{RegistrationID: "reg-1", Email: "a@example.com", Action: "sent", ProcessedAt: time.Now()})
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, st)
+
+	for _, tc := range []struct{ method, target, token string }{
+		{http.MethodGet, "/admin/processed", ""},
+		{http.MethodGet, "/admin/processed", "wrong"},
+		{http.MethodDelete, "/admin/processed/reg-1", ""},
+		{http.MethodDelete, "/admin/processed/reg-1", "wrong"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, adminRequest(tc.method, tc.target, tc.token))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s token=%q: status = %d, want 401", tc.method, tc.target, tc.token, rec.Code)
+		}
+	}
+
+	// The row must survive every rejected delete.
+	processed, err := st.Processed(context.Background(), "reg-1")
+	if err != nil {
+		t.Fatalf("Processed: %v", err)
+	}
+	if !processed {
+		t.Error("unauthorized delete removed the row")
+	}
+}
+
+func TestAdminTokenSupersedesPollToken(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(t, config.ModeLive)
+	cfg.AdminToken = "admin-secret"
+	h := newServer(t, cfg, &fakeRunner{}, openStore(t))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodGet, "/admin/processed", "poll-secret"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("poll token status = %d, want 401 once ADMIN_TOKEN is set", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodGet, "/admin/processed", "admin-secret"))
+	if rec.Code != http.StatusOK {
+		t.Errorf("admin token status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAdminDeleteProcessedRemovesRegistration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openStore(t)
+	seedProcessed(t, st, store.Record{RegistrationID: "reg-1", Email: "a@example.com", Action: "sent", ProcessedAt: time.Now()})
+	if err := st.SaveArtifact(ctx, store.Artifact{RegistrationID: "reg-1", AccessToken: "tok", PKPass: []byte("pass")}); err != nil {
+		t.Fatalf("SaveArtifact: %v", err)
+	}
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, st)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodDelete, "/admin/processed/reg-1", "poll-secret"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: body %s", rec.Code, rec.Body.String())
+	}
+
+	processed, err := st.Processed(ctx, "reg-1")
+	if err != nil {
+		t.Fatalf("Processed: %v", err)
+	}
+	if processed {
+		t.Error("registration still processed after delete")
+	}
+
+	// The pass link must stop working the moment the ledger row is gone.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/passes/reg-1?t=tok", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("pass download after delete = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminDeleteUnknownRegistrationIs404(t *testing.T) {
+	t.Parallel()
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, openStore(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, adminRequest(http.MethodDelete, "/admin/processed/nope", "poll-secret"))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminEndpointsWithoutStoreAreUnavailable(t *testing.T) {
+	t.Parallel()
+	h := newServer(t, testConfig(t, config.ModeLive), &fakeRunner{}, nil)
+	for _, tc := range []struct{ method, target string }{
+		{http.MethodGet, "/admin/processed"},
+		{http.MethodDelete, "/admin/processed/reg-1"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, adminRequest(tc.method, tc.target, "poll-secret"))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s: status = %d, want 503", tc.method, tc.target, rec.Code)
+		}
+	}
+}

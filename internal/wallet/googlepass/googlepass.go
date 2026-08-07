@@ -169,7 +169,7 @@ func (i *Issuer) SaveJWT(b domain.Badge, loc *time.Location) (string, error) {
 		ClassID:     i.cfg.ClassID,
 		GenericType: "GENERIC_TYPE_UNSPECIFIED",
 		State:       "ACTIVE",
-		CardTitle:   text("North Landing DGC"),
+		CardTitle:   text("North Landing Community"),
 		Header:      text(b.PassType.Label()),
 		Logo: &walletImage{
 			SourceURI:          imageURI{URI: LogoURI},

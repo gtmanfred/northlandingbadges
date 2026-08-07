@@ -22,7 +22,7 @@ func testConfig() config.AppleConfig {
 	return config.AppleConfig{
 		PassTypeIdentifier: "pass.com.northlanding.badge",
 		TeamIdentifier:     "TESTTEAM01",
-		OrganizationName:   "North Landing DGC",
+		OrganizationName:   "North Landing Community",
 		CertPEM:            testkeys.ApplePassCertPEM(),
 		KeyPEM:             testkeys.ApplePassKeyPEM(),
 		WWDRPEM:            testkeys.AppleWWDRPEM(),

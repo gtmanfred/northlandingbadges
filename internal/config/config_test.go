@@ -293,3 +293,28 @@ func TestLoadRejectsNonNumericSeasonYear(t *testing.T) {
 		t.Fatal("Load with a non-numeric DGS_SEASON_YEAR = nil error, want an error")
 	}
 }
+
+func TestAdminSecretFallsBackToPollToken(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(env(nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AdminToken != "" {
+		t.Errorf("AdminToken = %q, want empty when ADMIN_TOKEN is unset", cfg.AdminToken)
+	}
+	if got := cfg.AdminSecret(); got != "s3cret" {
+		t.Errorf("AdminSecret() = %q, want the poll token as fallback", got)
+	}
+}
+
+func TestAdminSecretPrefersAdminToken(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(env(map[string]string{"ADMIN_TOKEN": "admin-only"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.AdminSecret(); got != "admin-only" {
+		t.Errorf("AdminSecret() = %q, want admin-only", got)
+	}
+}

@@ -104,7 +104,7 @@ func TestRenderSubjectAndBodyContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if want := "Your North Landing DGC Day Pass — expires Jul 5, 2026"; msg.Subject != want {
+	if want := "Your North Landing Community Day Pass — expires Jul 5, 2026"; msg.Subject != want {
 		t.Errorf("Subject = %q, want %q", msg.Subject, want)
 	}
 	for _, want := range []string{
@@ -173,7 +173,7 @@ func TestMIMEStructure(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	raw, err := msg.MIME(email.MIMEOptions{
-		From:      mail.Address{Name: "North Landing DGC", Address: "club@gmail.com"},
+		From:      mail.Address{Name: "North Landing Community", Address: "club@gmail.com"},
 		To:        []string{"casey@example.com"},
 		Date:      time.Date(2026, 7, 4, 10, 5, 0, 0, time.UTC),
 		MessageID: "test@northlanding",
@@ -187,7 +187,7 @@ func TestMIMEStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("message does not parse: %v", err)
 	}
-	if got := parsed.Header.Get("From"); got != `"North Landing DGC" <club@gmail.com>` {
+	if got := parsed.Header.Get("From"); got != `"North Landing Community" <club@gmail.com>` {
 		t.Errorf("From = %q", got)
 	}
 	if got := parsed.Header.Get("To"); got != "casey@example.com" {
@@ -280,7 +280,7 @@ func TestMIMEIsDeterministicWithFixedBoundary(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	opts := email.MIMEOptions{
-		From:      mail.Address{Name: "North Landing DGC", Address: "club@gmail.com"},
+		From:      mail.Address{Name: "North Landing Community", Address: "club@gmail.com"},
 		To:        []string{"casey@example.com"},
 		Date:      time.Date(2026, 7, 4, 10, 5, 0, 0, time.UTC),
 		MessageID: "test@northlanding",

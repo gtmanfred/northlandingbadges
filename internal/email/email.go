@@ -91,10 +91,10 @@ func Render(d Data) (Message, error) {
 
 	// Founder badges never expire, so the copy promises no date.
 	expiresText := "Never"
-	subject := fmt.Sprintf("%sYour North Landing DGC %s", d.SubjectPrefix, d.Badge.PassType.Label())
+	subject := fmt.Sprintf("%sYour North Landing Community %s", d.SubjectPrefix, d.Badge.PassType.Label())
 	if d.Badge.Expires() {
 		expiresText = d.Badge.ExpiresAt.In(loc).Format(badge.DateLayout)
-		subject = fmt.Sprintf("%sYour North Landing DGC %s — expires %s",
+		subject = fmt.Sprintf("%sYour North Landing Community %s — expires %s",
 			d.SubjectPrefix, d.Badge.PassType.Label(), d.Badge.ExpiresAt.In(loc).Format("Jan 2, 2006"))
 	}
 
@@ -143,7 +143,7 @@ func plainText(td templateData) string {
 	if td.Notice != "" {
 		fmt.Fprintf(&b, "%s\n\n", td.Notice)
 	}
-	fmt.Fprintf(&b, "NORTH LANDING DGC\n\nHi %s, your %s is ready.\n\n", td.GuestName, td.PassTypeLabel)
+	fmt.Fprintf(&b, "NORTH LANDING COMMUNITY\n\nHi %s, your %s is ready.\n\n", td.GuestName, td.PassTypeLabel)
 	fmt.Fprintf(&b, "Pass type:    %s\n", td.PassTypeLabel)
 	fmt.Fprintf(&b, "Expires:      %s\n", td.ExpiresText)
 	fmt.Fprintf(&b, "Registration: %s\n", td.RegistrationID)

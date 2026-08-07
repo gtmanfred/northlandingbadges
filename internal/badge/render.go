@@ -118,12 +118,12 @@ func Render(b domain.Badge, loc *time.Location) ([]byte, error) {
 		expiresLine = "EXPIRES " + strings.ToUpper(b.ExpiresAt.In(loc).Format(ShortDateLayout))
 	}
 
-	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING DGC")
+	drawScaled(img, 60, 60, 3, accent, "NORTH LANDING COMMUNITY")
 	drawScaled(img, 60, 200, nameScale, colorText, strings.ToUpper(truncate(drawable(b.Registration.Name), maxNameChars)))
 	drawScaled(img, 60, 300, 3, accent, strings.ToUpper(b.PassType.Label()))
 	drawScaled(img, 60, 380, 2, colorMuted, expiresLine)
 	drawScaled(img, 60, 440, 2, colorMuted, "MEMBER "+truncate(drawable(b.Registration.ID), 32))
-	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing DGC. Not transferable.")
+	drawScaled(img, 60, 490, 1, colorMuted, "Present this badge at North Landing Community. Not transferable.")
 
 	// Club mark in the empty right-hand region. 200px at x=740 leaves the same
 	// 60px right margin the text block uses.
@@ -201,10 +201,10 @@ func Logo(width, height int) ([]byte, error) {
 // scale 1.
 //
 // Candidates are tried longest-first so a whole shorter wordmark is preferred
-// over an ellipsised longer one: dropping "DGC" is acceptable because the club
-// mark beside the text already carries it.
+// over an ellipsised longer one: dropping "COMMUNITY" is acceptable because the
+// club mark beside the text already carries it.
 func fitWordmark(width, height int) (string, int) {
-	candidates := []string{"NORTH LANDING DGC", "NORTH LANDING"}
+	candidates := []string{"NORTH LANDING COMMUNITY", "NORTH LANDING"}
 	avail := width - height - wordmarkGap
 	glyph := basicfont.Face7x13.Advance
 

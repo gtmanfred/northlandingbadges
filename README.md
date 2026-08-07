@@ -1,6 +1,6 @@
 # North Landing Badge Distribution System
 
-Digital badge delivery for [North Landing DGC](https://www.discgolfscene.com/club/7500/north-landing-dgc).
+Digital badge delivery for [North Landing Community](https://www.discgolfscene.com/club/7500/north-landing-dgc).
 Physical badge handout at the on-site shop ends next year, so this service watches
 DiscGolfScene registrations, generates a badge with the right expiration, and emails
 it with Apple Wallet and Google Wallet passes attached.
@@ -65,6 +65,18 @@ transitions do not shift the wall clock.
 | `POST /tasks/poll` | `Authorization: Bearer $POLL_TRIGGER_TOKEN` (or `X-Poll-Token`) | Runs one poll cycle. Idempotent. Returns a JSON report. `401` without a valid token. |
 | `POST /webhooks/discgolfscene` | `DGS_WEBHOOK_SECRET` (falls back to the poll token) | Processes one registration payload. |
 | `GET /passes/{id}.pkpass?t=…` | per-pass token from the email link | Serves the signed Apple Wallet bundle. |
+| `GET /admin/processed[?year=YYYY]` | `ADMIN_TOKEN` (falls back to the poll token) | Lists processed registrations — email, pass type, expiry, action — newest first. `year` filters on badge expiry year; founder badges never expire and so appear only unfiltered. `400` on a non-numeric year. |
+| `DELETE /admin/processed/{id}` | `ADMIN_TOKEN` (falls back to the poll token) | Forgets one registration and its stored passes, so the next cycle re-issues the badge. Any emailed wallet link for it stops working. `404` if unknown. |
+
+Examples:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  'https://badges.example.com/admin/processed?year=2026'
+
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://badges.example.com/admin/processed/REG-12345
+```
 
 There is no UI and no user database — DiscGolfScene remains the source of truth
 (spec §2).
@@ -87,12 +99,13 @@ Optional:
 | `BASE_URL` | `http://localhost:8080` | Origin used to build the Apple Wallet download link. |
 | `CLUB_TIMEZONE` | `America/New_York` | Drives every expiration wall clock. |
 | `SMTP_ADDR` | `smtp.gmail.com:587` | |
-| `EMAIL_FROM_NAME` | `North Landing DGC` | |
+| `EMAIL_FROM_NAME` | `North Landing Community` | |
 | `DGS_EVENT_SLUG` | — | Membership event slug, e.g. `North_Landing_Disc_Golf_Membership_2026_Season`. Update yearly. Unset means webhook-only; poll cycles become no-ops. |
 | `DGS_SEASON_YEAR` | — | Season year, e.g. `2026`. Update yearly, alongside the slug. |
 | `DGS_EMAIL`, `DGS_PASSWORD` | — | Club-admin login with staff access on that event. |
 | `DGS_BASE_URL` | `https://www.discgolfscene.com` | Origin for login and the export. Override only for tests. |
 | `DGS_WEBHOOK_SECRET` | poll token | Secret for the webhook endpoint. |
+| `ADMIN_TOKEN` | poll token | Secret for the `/admin` endpoints. Set it to grant ledger read/delete without handing out the scheduler's trigger. |
 | `APPLE_PASS_TYPE_ID`, `APPLE_TEAM_ID`, `APPLE_CERT_PEM`, `APPLE_KEY_PEM`, `APPLE_WWDR_PEM`, `APPLE_ORG_NAME` | — | Unset means emails ship without a `.pkpass`. |
 | `GOOGLE_ISSUER_ID`, `GOOGLE_CLASS_ID`, `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY_PEM` | — | Unset means no Save-to-Google-Wallet button. |
 
